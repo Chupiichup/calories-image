@@ -156,5 +156,66 @@ describe("Database Repository & Calorie Tracking", () => {
     expect(unique.find((m) => m.id === "meal-dup-1")).toBeDefined();
     expect(unique.find((m) => m.id === "meal-diff")).toBeDefined();
   });
+
+  it("deletes a meal and immediately verifies its removal", async () => {
+    const saved = await repository.saveMeal({
+      mealType: "dinner",
+      eatenAt: new Date().toISOString(),
+      notes: "Cơm gia đình",
+      analysisStatus: "manual",
+      items: [
+        {
+          foodName: "Cơm trắng",
+          portionG: 150,
+          nutrition: { calories: 195, protein: 4, carbs: 42, fat: 0.4, fiber: 0.6 },
+        },
+      ],
+    });
+
+    expect(saved.id).toBeDefined();
+
+    // Verify it exists in all meals
+    let all = await repository.getAllMeals();
+    expect(all.some((m) => m.id === saved.id)).toBe(true);
+
+    // Delete the meal
+    await repository.deleteMeal(saved.id);
+
+    // Verify it no longer exists
+    all = await repository.getAllMeals();
+    expect(all.some((m) => m.id === saved.id)).toBe(false);
+  });
+
+  it("logs, retrieves, and deletes body weight entries", async () => {
+    const nowIso = new Date().toISOString();
+    const entry = await repository.addWeightEntry({
+      weightKg: 78.5,
+      recordedAt: nowIso,
+      notes: "Cân sáng sau thức dậy",
+    });
+
+    expect(entry).toBeDefined();
+    expect(entry.weightKg).toBe(78.5);
+
+    let history = await repository.getWeightEntries();
+    expect(history.some((w) => w.id === entry.id)).toBe(true);
+
+    // Delete entry
+    await repository.deleteWeightEntry(entry.id);
+    history = await repository.getWeightEntries();
+    expect(history.some((w) => w.id === entry.id)).toBe(false);
+  });
+
+  it("exports all user data as valid JSON", async () => {
+    const exportedJson = await repository.exportAllData();
+    expect(typeof exportedJson).toBe("string");
+
+    const parsed = JSON.parse(exportedJson);
+    expect(parsed.exportedAt).toBeDefined();
+    expect(parsed.profile).toBeDefined();
+    expect(parsed.goal).toBeDefined();
+    expect(Array.isArray(parsed.meals)).toBe(true);
+    expect(Array.isArray(parsed.weightEntries)).toBe(true);
+  });
 });
 

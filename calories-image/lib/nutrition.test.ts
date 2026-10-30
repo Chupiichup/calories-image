@@ -180,4 +180,98 @@ describe("nutrition calculations engine", () => {
       }),
     ).toThrow();
   });
+
+  describe("boundary conditions and edge cases", () => {
+    it("protects against extreme deficit crash diets with female safety floor (1200 kcal)", () => {
+      // Petite sedentary female: 45kg, 150cm, 35 years old
+      const result = calculateComprehensiveTargets(
+        {
+          weightKg: 45,
+          heightCm: 150,
+          ageYears: 35,
+          sex: "female",
+          activityLevel: "sedentary",
+        },
+        "aggressive",
+      );
+
+      // Raw 25% deficit would be below 1000 kcal, but safety floor MUST clamp at >= 1200 kcal
+      expect(result.calorieTarget).toBeGreaterThanOrEqual(1200);
+      expect(result.calorieTarget).toBeLessThanOrEqual(result.tdee);
+      expect(result.macros.protein).toBeGreaterThanOrEqual(75); // minimum protein protection
+    });
+
+    it("protects against crash diets with male safety floor (1400 kcal)", () => {
+      // Very light sedentary male: 50kg, 160cm, 40 years old
+      const result = calculateComprehensiveTargets(
+        {
+          weightKg: 50,
+          heightCm: 160,
+          ageYears: 40,
+          sex: "male",
+          activityLevel: "sedentary",
+        },
+        "aggressive",
+      );
+
+      expect(result.calorieTarget).toBeGreaterThanOrEqual(1400);
+      expect(result.macros.protein).toBeGreaterThanOrEqual(100);
+    });
+
+    it("handles prefer_not_to_say biological sex using midpoint BMR", () => {
+      const maleBmr = calculateBmr({ weightKg: 70, heightCm: 170, ageYears: 30, sex: "male" });
+      const femaleBmr = calculateBmr({ weightKg: 70, heightCm: 170, ageYears: 30, sex: "female" });
+      const neutralBmr = calculateBmr({ weightKg: 70, heightCm: 170, ageYears: 30, sex: "prefer_not_to_say" });
+
+      expect(neutralBmr).toBeGreaterThan(femaleBmr);
+      expect(neutralBmr).toBeLessThan(maleBmr);
+      // Midpoint: (base + 5 + base - 161) / 2 = base - 78
+      expect(Math.abs(neutralBmr - (maleBmr + femaleBmr) / 2)).toBeLessThanOrEqual(2);
+    });
+
+    it("rejects non-positive numbers in BMR calculation", () => {
+      expect(() => calculateBmr({ weightKg: -70, heightCm: 170, ageYears: 30, sex: "male" })).toThrow();
+      expect(() => calculateBmr({ weightKg: 70, heightCm: 0, ageYears: 30, sex: "male" })).toThrow();
+      expect(() => calculateBmr({ weightKg: 70, heightCm: 170, ageYears: -5, sex: "male" })).toThrow();
+      expect(() => calculateBmr({ weightKg: NaN, heightCm: 170, ageYears: 30, sex: "male" })).toThrow();
+    });
+
+    it("evaluates high-weight users safely without overflow", () => {
+      const heavyResult = calculateComprehensiveTargets(
+        {
+          weightKg: 180,
+          heightCm: 185,
+          ageYears: 45,
+          sex: "male",
+          activityLevel: "light",
+        },
+        "moderate",
+      );
+
+      expect(heavyResult.bmi).toBeGreaterThan(40);
+      expect(heavyResult.bmiCategory).toBe("Béo phì độ II");
+      expect(heavyResult.calorieTarget).toBeGreaterThan(2000);
+      expect(heavyResult.macros.protein).toBe(360); // 180kg * 2.0g
+    });
+
+    it("evaluates all weight loss pace tiers correctly", () => {
+      const baseInput = {
+        weightKg: 80,
+        heightCm: 175,
+        ageYears: 30,
+        sex: "male" as const,
+        activityLevel: "moderate" as const,
+      };
+
+      const slow = calculateComprehensiveTargets(baseInput, "slow");
+      const moderate = calculateComprehensiveTargets(baseInput, "moderate");
+      const aggressive = calculateComprehensiveTargets(baseInput, "aggressive");
+
+      expect(slow.calorieTarget).toBeGreaterThan(moderate.calorieTarget);
+      expect(moderate.calorieTarget).toBeGreaterThan(aggressive.calorieTarget);
+      expect(slow.deficitPercent).toBe(15);
+      expect(moderate.deficitPercent).toBe(20);
+      expect(aggressive.deficitPercent).toBe(25);
+    });
+  });
 });
