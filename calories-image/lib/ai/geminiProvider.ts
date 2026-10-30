@@ -19,8 +19,11 @@ export class GeminiVisionProvider implements IAiVisionProvider {
   private timeoutMs: number;
 
   constructor(apiKey: string, modelName = "gemini-1.5-flash", timeoutMs = 30000) {
-    this.apiKey = apiKey;
-    this.modelName = modelName;
+    this.apiKey = (apiKey || "").trim().replace(/^["']|["']$/g, "");
+    this.modelName = (modelName || "gemini-1.5-flash")
+      .trim()
+      .replace(/^["']|["']$/g, "")
+      .replace(/^models\//, "");
     this.timeoutMs = timeoutMs;
   }
 
@@ -29,6 +32,7 @@ export class GeminiVisionProvider implements IAiVisionProvider {
     mimeType: string;
     userNote?: string;
   }): Promise<MealAnalysisResult> {
+    const cleanKey = this.apiKey;
     const cleanBase64 = params.imageBase64.replace(/^data:[^;]+;base64,/, "").trim();
     // Gemini API only accepts 'image/jpeg', 'image/png', 'image/webp'
     const safeMime =
@@ -64,21 +68,94 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
   "nutritionalInsight": string
 }`;
 
-    // Try both v1 and v1beta with multiple model aliases
-    const attempts = [
-      { version: "v1", model: this.modelName || "gemini-1.5-flash" },
-      { version: "v1beta", model: this.modelName || "gemini-1.5-flash" },
-      { version: "v1beta", model: "gemini-2.0-flash" },
-      { version: "v1beta", model: "gemini-1.5-flash-latest" },
-      { version: "v1", model: "gemini-1.5-flash" },
-      { version: "v1beta", model: "gemini-1.5-pro" },
-      { version: "v1", model: "gemini-1.5-pro" },
-    ];
+    // Step 1: Query ListModels to find which models are actually supported for this key
+    let candidateModels: Array<{ version: string; fullName: string; shortName: string }> = [];
+    let listErrorMessage = "";
+
+    for (const ver of ["v1beta", "v1"]) {
+      try {
+        const listRes = await fetch(`https://generativelanguage.googleapis.com/${ver}/models?key=${cleanKey}`, {
+          headers: { "x-goog-api-key": cleanKey },
+        });
+        const listData = await listRes.json();
+
+        if (!listRes.ok) {
+          if (listData?.error?.message) {
+            listErrorMessage = `[${ver}] ${listData.error.message}`;
+            // If the error is fatal (invalid key, project disabled, permission denied, location not supported)
+            if (
+              listRes.status === 400 ||
+              listRes.status === 403 ||
+              listData.error?.status === "PERMISSION_DENIED" ||
+              listData.error?.status === "INVALID_ARGUMENT"
+            ) {
+              throw new Error(
+                `Google Gemini API (${listRes.status} ${listData.error.status || ""}): ${listData.error.message}`
+              );
+            }
+          }
+          continue;
+        }
+
+        const modelsList: any[] = listData.models || [];
+        const supported = modelsList.filter(
+          (m: any) =>
+            Array.isArray(m.supportedGenerationMethods) &&
+            m.supportedGenerationMethods.includes("generateContent"),
+        );
+
+        for (const m of supported) {
+          const fullName = m.name.startsWith("models/") ? m.name : `models/${m.name}`;
+          const shortName = m.name.replace(/^models\//, "");
+          if (!candidateModels.some((c) => c.shortName === shortName)) {
+            candidateModels.push({ version: ver, fullName, shortName });
+          }
+        }
+
+        if (candidateModels.length > 0) {
+          break; // Prioritize the first working endpoint version (usually v1beta)
+        }
+      } catch (listErr: any) {
+        if (listErr.message && listErr.message.includes("Google Gemini API")) {
+          throw listErr; // Bubble up clear fatal errors from Google
+        }
+        console.warn(`ListModels error on ${ver}:`, listErr);
+      }
+    }
+
+    // Step 2: Sort candidates to prioritize best vision model
+    if (candidateModels.length > 0) {
+      candidateModels.sort((a, b) => {
+        let scoreA = 0;
+        let scoreB = 0;
+        if (a.shortName === this.modelName || a.shortName.includes(this.modelName)) scoreA += 50;
+        if (b.shortName === this.modelName || b.shortName.includes(this.modelName)) scoreB += 50;
+        if (a.shortName.includes("flash")) scoreA += 20;
+        if (b.shortName.includes("flash")) scoreB += 20;
+        if (a.shortName.includes("2.0")) scoreA += 10;
+        if (b.shortName.includes("2.0")) scoreB += 10;
+        if (a.shortName.includes("1.5")) scoreA += 5;
+        if (b.shortName.includes("1.5")) scoreB += 5;
+        return scoreB - scoreA;
+      });
+    } else {
+      // Fallback static list if ListModels didn't return (e.g. strict corporate proxy)
+      candidateModels = [
+        { version: "v1beta", fullName: "models/gemini-2.0-flash", shortName: "gemini-2.0-flash" },
+        { version: "v1beta", fullName: "models/gemini-1.5-flash", shortName: "gemini-1.5-flash" },
+        { version: "v1", fullName: "models/gemini-1.5-flash", shortName: "gemini-1.5-flash" },
+        { version: "v1beta", fullName: "models/gemini-2.5-flash", shortName: "gemini-2.5-flash" },
+        { version: "v1beta", fullName: "models/gemini-1.5-flash-latest", shortName: "gemini-1.5-flash-latest" },
+        { version: "v1", fullName: "models/gemini-1.5-pro", shortName: "gemini-1.5-pro" },
+        { version: "v1beta", fullName: "models/gemini-1.5-pro", shortName: "gemini-1.5-pro" },
+      ];
+    }
 
     let lastError: Error | null = null;
 
-    for (const attempt of attempts) {
-      const endpoint = `https://generativelanguage.googleapis.com/${attempt.version}/models/${attempt.model}:generateContent?key=${this.apiKey}`;
+    // Step 3: Call generateContent with discovered models
+    for (const attempt of candidateModels) {
+      const endpoint = `https://generativelanguage.googleapis.com/${attempt.version}/${attempt.fullName}:generateContent?key=${cleanKey}`;
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -88,7 +165,7 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-goog-api-key": this.apiKey,
+            "x-goog-api-key": cleanKey,
           },
           signal: controller.signal,
           body: JSON.stringify({
@@ -114,7 +191,7 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`Gemini API (${attempt.version}/${attempt.model}) error ${response.status}: ${errorText}`);
+          throw new Error(`Gemini API (${attempt.version}/${attempt.shortName}) error ${response.status}: ${errorText}`);
         }
 
         const json = await response.json();
@@ -138,8 +215,8 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         return MealAnalysisResponseSchema.parse(parsedData);
       } catch (err: any) {
         lastError = err;
-        console.warn(`Attempt with ${attempt.version}/${attempt.model} failed: ${err.message}`);
-        // If it was a 404 or model not found, try next candidate model/version
+        console.warn(`Attempt with ${attempt.version}/${attempt.shortName} failed: ${err.message}`);
+        // If it was a 404, try next candidate model/version
         if (err.message && (err.message.includes("404") || err.message.includes("not found"))) {
           continue;
         }
@@ -150,59 +227,12 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
       }
     }
 
-    // Dynamic discovery fallback: query ListModels to find active model for this API key
-    try {
-      const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${this.apiKey}`, {
-        headers: { "x-goog-api-key": this.apiKey },
-      });
-      if (listRes.ok) {
-        const listData = await listRes.json();
-        const availableModels: Array<{ name: string; supportedGenerationMethods?: string[] }> = listData.models || [];
-        const candidate = availableModels.find(
-          (m) =>
-            m.supportedGenerationMethods?.includes("generateContent") &&
-            (m.name.includes("flash") || m.name.includes("pro")),
-        );
-        if (candidate) {
-          const modelClean = candidate.name.replace(/^models\//, "");
-          const dynEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelClean}:generateContent?key=${this.apiKey}`;
-          const dynRes = await fetch(dynEndpoint, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": this.apiKey,
-            },
-            body: JSON.stringify({
-              generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
-              contents: [
-                {
-                  parts: [
-                    { text: promptText },
-                    { inlineData: { mimeType: safeMime, data: cleanBase64 } },
-                  ],
-                },
-              ],
-            }),
-          });
-
-          if (dynRes.ok) {
-            const dynJson = await dynRes.json();
-            const dynText = dynJson?.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (dynText) {
-              let cleaned = dynText.trim();
-              if (cleaned.startsWith("```json")) cleaned = cleaned.replace(/^```json\s*/i, "");
-              if (cleaned.startsWith("```")) cleaned = cleaned.replace(/^```\s*/i, "");
-              if (cleaned.endsWith("```")) cleaned = cleaned.replace(/```\s*$/i, "");
-              return MealAnalysisResponseSchema.parse(JSON.parse(cleaned.trim()));
-            }
-          }
-        }
-      }
-    } catch (listErr) {
-      console.warn("Dynamic ListModels discovery failed:", listErr);
+    if (listErrorMessage && lastError?.message && lastError.message.includes("404")) {
+      throw new Error(
+        `Không tìm thấy model phù hợp cho API key này. Chi tiết: ${listErrorMessage}. Gợi ý: Hãy tạo API key mới trực tiếp tại https://aistudio.google.com/app/apikey hoặc kích hoạt Generative Language API trong Google Cloud Console.`
+      );
     }
 
     throw lastError || new Error("Không thể phân tích ảnh bằng Gemini Vision.");
   }
 }
-
