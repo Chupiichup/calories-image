@@ -82,7 +82,6 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         if (!listRes.ok) {
           if (listData?.error?.message) {
             listErrorMessage = `[${ver}] ${listData.error.message}`;
-            // If the error is fatal (invalid key, project disabled, permission denied)
             if (
               listRes.status === 400 ||
               listRes.status === 403 ||
@@ -117,13 +116,13 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         }
       } catch (listErr: any) {
         if (listErr.message && listErr.message.includes("Google Gemini API")) {
-          throw listErr; // Bubble up clear fatal errors from Google
+          throw listErr;
         }
         console.warn(`ListModels error on ${ver}:`, listErr);
       }
     }
 
-    // Step 2: Filter and sort candidates to prioritize best vision model
+    // Step 2: Filter and sort candidates to prioritize fast, low-latency vision models
     if (candidateModels.length > 0) {
       // Exclude preview-image, audio, tts, robotics, tool-only models
       const isUnsuitableModel = (name: string) =>
@@ -138,18 +137,21 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         if (a.shortName === this.modelName || a.shortName.includes(this.modelName)) scoreA += 100;
         if (b.shortName === this.modelName || b.shortName.includes(this.modelName)) scoreB += 100;
 
-        // Standard Flash models have the highest free tier availability
-        if (a.shortName === "gemini-2.5-flash") scoreA += 80;
-        if (b.shortName === "gemini-2.5-flash") scoreB += 80;
+        // Prioritize Flash-Lite models first for ultra-fast (sub-2s) execution without thinking stalls
+        if (a.shortName === "gemini-2.5-flash-lite") scoreA += 85;
+        if (b.shortName === "gemini-2.5-flash-lite") scoreB += 85;
+
+        if (a.shortName === "gemini-flash-lite-latest") scoreA += 80;
+        if (b.shortName === "gemini-flash-lite-latest") scoreB += 80;
+
+        if (a.shortName === "gemini-2.5-flash") scoreA += 75;
+        if (b.shortName === "gemini-2.5-flash") scoreB += 75;
 
         if (a.shortName === "gemini-flash-latest") scoreA += 70;
         if (b.shortName === "gemini-flash-latest") scoreB += 70;
 
-        if (a.shortName === "gemini-2.5-flash-lite") scoreA += 60;
-        if (b.shortName === "gemini-2.5-flash-lite") scoreB += 60;
-
-        if (a.shortName === "gemini-flash-lite-latest") scoreA += 50;
-        if (b.shortName === "gemini-flash-lite-latest") scoreB += 50;
+        if (a.shortName.includes("flash-lite")) scoreA += 60;
+        if (b.shortName.includes("flash-lite")) scoreB += 60;
 
         if (a.shortName.includes("flash")) scoreA += 30;
         if (b.shortName.includes("flash")) scoreB += 30;
@@ -162,10 +164,10 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
     } else {
       // Fallback static list
       candidateModels = [
-        { version: "v1beta", fullName: "models/gemini-2.5-flash", shortName: "gemini-2.5-flash" },
-        { version: "v1beta", fullName: "models/gemini-flash-latest", shortName: "gemini-flash-latest" },
         { version: "v1beta", fullName: "models/gemini-2.5-flash-lite", shortName: "gemini-2.5-flash-lite" },
         { version: "v1beta", fullName: "models/gemini-flash-lite-latest", shortName: "gemini-flash-lite-latest" },
+        { version: "v1beta", fullName: "models/gemini-2.5-flash", shortName: "gemini-2.5-flash" },
+        { version: "v1beta", fullName: "models/gemini-flash-latest", shortName: "gemini-flash-latest" },
         { version: "v1", fullName: "models/gemini-2.5-flash", shortName: "gemini-2.5-flash" },
         { version: "v1beta", fullName: "models/gemini-pro-latest", shortName: "gemini-pro-latest" },
         { version: "v1beta", fullName: "models/gemini-2.5-pro", shortName: "gemini-2.5-pro" },
@@ -181,6 +183,16 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
+      const genConfig: Record<string, any> = {
+        responseMimeType: "application/json",
+        temperature: 0.2,
+      };
+
+      // Disable thinking budget to prevent 28s reasoning stalls on Gemini 2.5 models
+      if (attempt.shortName.includes("2.5") || attempt.shortName.includes("flash")) {
+        genConfig.thinkingConfig = { thinkingBudget: 0 };
+      }
+
       try {
         const response = await fetch(endpoint, {
           method: "POST",
@@ -189,17 +201,6 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
             "x-goog-api-key": cleanKey,
           },
           signal: controller.signal,
-          const genConfig: Record<string, any> = {
-            responseMimeType: "application/json",
-            temperature: 0.2,
-          };
-
-          // Gemini 2.5 enables deep chain-of-thought thinking by default, which can take 30+ seconds.
-          // Setting thinkingBudget: 0 disables unnecessary reasoning tokens, reducing latency to 1-2 seconds.
-          if (attempt.shortName.includes("2.5") || attempt.shortName.includes("flash")) {
-            genConfig.thinkingConfig = { thinkingBudget: 0 };
-          }
-
           body: JSON.stringify({
             generationConfig: genConfig,
             contents: [
@@ -245,7 +246,7 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
       } catch (err: any) {
         lastError = err;
         console.warn(`Attempt with ${attempt.version}/${attempt.shortName} failed: ${err.message}`);
-        
+
         // If 404, 429 quota limit, 503 high demand, 500/502/504 server error, or timeout/abort, continue to next candidate!
         if (
           err.message &&
