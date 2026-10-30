@@ -69,17 +69,17 @@ export function generateNutritionCoachingInsights(params: {
   }
 
   // 3. Calorie deficit status
-  if (calorieDiff < -200) {
+  if (calorieDiff < 0) {
     insights.push({
       type: "warning",
       title: "Đã vượt ngưỡng calo mục tiêu",
-      message: `Hôm nay bạn đã vượt ~${round(Math.abs(calorieDiff), 0)} kcal so với kế hoạch thâm hụt. Đừng nản lòng hay nhịn ăn bù vào ngày mai; hãy duy trì sinh hoạt bình thường và đi bộ thêm 20-30 phút nếu thuận tiện.`,
+      message: `Hôm nay bạn đã vượt ~${round(Math.abs(calorieDiff), 0)} kcal so với kế hoạch thâm hụt giảm mỡ. Đừng nản lòng hay nhịn ăn bù vào ngày mai; hãy duy trì sinh hoạt bình thường và đi bộ thêm 20-30 phút nếu thuận tiện.`,
       actionableStep: "Uống thêm nước lọc, ăn tối nhẹ nhàng với canh rau và đạm nạc.",
     });
-  } else if (calorieDiff >= 0 && calorieDiff <= 400 && todayMeals.length >= 2) {
+  } else if (calorieDiff >= 0 && calorieDiff <= 350 && todayMeals.length >= 2) {
     insights.push({
       type: "positive",
-      title: "Thâm hụt calo hoàn hảo",
+      title: "Thâm hụt calo chuẩn mục tiêu",
       message: `Bạn đang kiểm soát năng lượng rất tốt, còn ${round(calorieDiff, 0)} kcal cho các bữa phụ hoặc bữa nhẹ tối.`,
     });
   }

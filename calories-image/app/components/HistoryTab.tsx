@@ -188,7 +188,8 @@ export function HistoryTab({ meals, goal, onMergeMeals, onSelectDateForDiary }: 
               <tbody className="divide-y divide-stone-100">
                 {historyDays.map((d) => {
                   const diff = goal.dailyCalorieTarget - d.calories;
-                  const isSafe = diff >= -150 && diff <= 450;
+                  const isOver = diff < 0;
+                  const isSafe = diff >= 0 && diff <= 300;
                   const isExpanded = expandedDate === d.date;
 
                   return (
@@ -223,17 +224,21 @@ export function HistoryTab({ meals, goal, onMergeMeals, onSelectDateForDiary }: 
                         <td className="py-3 text-stone-600">{round(d.fat, 0)}g</td>
                         <td className="py-3 text-teal-700">{round(d.fiber, 0)}g</td>
                         <td className="py-3 text-right">
-                          {isSafe ? (
-                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                          {d.calories === 0 ? (
+                            <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-medium text-stone-500">
+                              Chưa nạp calo
+                            </span>
+                          ) : isOver ? (
+                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-800 border border-rose-200">
+                              Vượt calo (+{round(Math.abs(diff), 0)})
+                            </span>
+                          ) : isSafe ? (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 border border-emerald-200">
                               Chuẩn thâm hụt
                             </span>
-                          ) : diff < -150 ? (
-                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-800">
-                              Vượt calo ({round(Math.abs(diff), 0)})
-                            </span>
                           ) : (
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                              Dư thâm hụt
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 border border-amber-200">
+                              Dư thâm hụt (còn {round(diff, 0)})
                             </span>
                           )}
                         </td>
