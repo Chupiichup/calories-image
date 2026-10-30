@@ -273,5 +273,68 @@ describe("nutrition calculations engine", () => {
       expect(moderate.deficitPercent).toBe(20);
       expect(aggressive.deficitPercent).toBe(25);
     });
+
+    it("calculates realistic weight loss timeline and completion date", () => {
+      // Female: 75kg wanting to reach 45kg (30kg fat loss)
+      const result = calculateComprehensiveTargets(
+        {
+          weightKg: 75,
+          heightCm: 158,
+          ageYears: 35,
+          sex: "female",
+          activityLevel: "sedentary",
+          goalWeightKg: 45,
+        },
+        "aggressive",
+      );
+
+      // TDEE is 1682 kcal. 25% deficit = 421 kcal deficit -> target ~1261 kcal
+      expect(result.calorieTarget).toBeGreaterThanOrEqual(1200);
+      expect(result.timeline).toBeDefined();
+      expect(result.timeline.weightToLoseKg).toBe(30);
+      expect(result.timeline.totalDeficitNeededKcal).toBe(231000); // 30 * 7700
+      expect(result.timeline.targetWeeks).toBeGreaterThan(50); // realistic multi-month journey
+      expect(result.timeline.estimatedCompletionDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(result.timeline.formattedCompletionDate).toBeTruthy();
+    });
+
+    it("adjusts daily calories dynamically when custom targetWeeks is provided", () => {
+      const input = {
+        weightKg: 75,
+        heightCm: 158,
+        ageYears: 35,
+        sex: "female" as const,
+        activityLevel: "moderate" as const, // TDEE: 1402 * 1.55 = 2173 kcal
+        goalWeightKg: 65, // 10kg fat loss -> 77,000 kcal total deficit
+      };
+
+      // 1. Shorter time (20 weeks) -> requires ~550 kcal/day deficit -> target ~1623 kcal
+      const fastResult = calculateComprehensiveTargets(input, { targetWeeks: 20 });
+      // 2. Longer time (40 weeks) -> requires ~275 kcal/day deficit -> target ~1898 kcal
+      const gentleResult = calculateComprehensiveTargets(input, { targetWeeks: 40 });
+
+      expect(fastResult.calorieTarget).toBeLessThan(gentleResult.calorieTarget);
+      expect(fastResult.timeline.weeklyWeightChangeKg).toBeGreaterThan(gentleResult.timeline.weeklyWeightChangeKg);
+      expect(fastResult.timeline.targetWeeks).toBe(20);
+      expect(gentleResult.timeline.targetWeeks).toBe(40);
+    });
+
+    it("clamps to safety floor and generates medical warning if user enters dangerously short duration", () => {
+      const input = {
+        weightKg: 75,
+        heightCm: 158,
+        ageYears: 35,
+        sex: "female" as const,
+        activityLevel: "sedentary" as const, // TDEE: 1682 kcal
+        goalWeightKg: 45, // 30kg loss
+      };
+
+      // Extreme/dangerous request: 30kg in 10 weeks (would require 3300 kcal/day deficit!)
+      const extremeResult = calculateComprehensiveTargets(input, { targetWeeks: 10 });
+      // Safety floor MUST protect the user: clamp at >= 1200 kcal
+      expect(extremeResult.calorieTarget).toBeGreaterThanOrEqual(1200);
+      expect(extremeResult.warnings.some((w) => w.includes("sàn an toàn y học"))).toBe(true);
+      expect(extremeResult.timeline.safetyStatus).toBe("dangerous_low_calorie");
+    });
   });
 });

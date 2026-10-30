@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Clock,
   ChevronRight,
+  Calendar,
 } from "lucide-react";
 import type { StoredMeal, StoredGoal, StoredWeightEntry, StoredProfile } from "@/lib/db/repository";
 import type { CoachingInsight } from "@/lib/coaching";
@@ -127,9 +128,22 @@ export function DashboardTab({
               <span className="text-4xl sm:text-5xl font-black tracking-tight">{goal.dailyCalorieTarget}</span>
               <span className="text-lg font-medium text-emerald-200">kcal</span>
             </div>
-            <p className="text-xs text-emerald-100/90 max-w-md">
-              Thiết kế theo công thức Mifflin-St Jeor với tốc độ giảm an toàn ({goal.weightLossPace === "slow" ? "Chậm 15%" : goal.weightLossPace === "aggressive" ? "Nhanh 25%" : "Vừa phải 20%"}).
-            </p>
+            <div className="text-xs text-emerald-100/90 max-w-md space-y-1">
+              <p>
+                Thiết kế theo công thức Mifflin-St Jeor ({goal.weightLossPace === "slow" ? "Chậm 15%" : goal.weightLossPace === "aggressive" ? "Nhanh 25%" : "Vừa phải 20%"}).
+              </p>
+              {goal.currentWeightKg > goal.goalWeightKg && (
+                <p className="flex items-center gap-1.5 text-lime-200 font-semibold pt-0.5">
+                  <Calendar className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Dự kiến đạt {goal.goalWeightKg}kg:{" "}
+                    {goal.targetWeeks
+                      ? `sau ~${goal.targetWeeks} tuần (${goal.targetDate || ""})`
+                      : `sau ~${Math.ceil(((goal.currentWeightKg - goal.goalWeightKg) * 7700) / (350 * 7))} tuần`}
+                  </span>
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Quick Metrics Cards */}

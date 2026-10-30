@@ -13,6 +13,10 @@ import {
   LogOut,
   ShieldCheck,
   Cloud,
+  Clock,
+  Calendar,
+  ArrowRight,
+  TrendingDown,
 } from "lucide-react";
 import type { StoredProfile, StoredGoal } from "@/lib/db/repository";
 import {
@@ -22,6 +26,7 @@ import {
   type BiologicalSex,
   type ActivityLevel,
   type WeightLossPace,
+  type TargetCalculationOptions,
 } from "@/lib/nutrition";
 
 interface ProfileTabProps {
@@ -51,6 +56,13 @@ export function ProfileTab({
   const [sex, setSex] = useState<BiologicalSex>(profile.sexForBmr);
   const [activity, setActivity] = useState<ActivityLevel>(profile.activityLevel);
   const [pace, setPace] = useState<WeightLossPace>(goal.weightLossPace);
+  const [targetMode, setTargetMode] = useState<"duration" | "pace">(() =>
+    goal.targetWeeks ? "duration" : "duration",
+  );
+  const [customWeeks, setCustomWeeks] = useState<number | "">(() => {
+    if (goal.targetWeeks && goal.targetWeeks > 0) return goal.targetWeeks;
+    return 40;
+  });
 
   const [isSpecialPregnant, setIsSpecialPregnant] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -71,8 +83,23 @@ export function ProfileTab({
       setCurrentWeight(goal.currentWeightKg);
       setGoalWeight(goal.goalWeightKg);
       setPace(goal.weightLossPace);
+      if (goal.targetWeeks && goal.targetWeeks > 0) {
+        setCustomWeeks(goal.targetWeeks);
+      }
     }
   }, [goal]);
+
+  const weightToLose =
+    typeof currentWeight === "number" &&
+    typeof goalWeight === "number" &&
+    currentWeight > goalWeight
+      ? round(currentWeight - goalWeight, 1)
+      : 0;
+
+  const calculationOptions: TargetCalculationOptions =
+    targetMode === "duration" && typeof customWeeks === "number" && customWeeks > 0
+      ? { targetWeeks: customWeeks }
+      : { pace };
 
   // Compute live deterministic preview of targets
   const calculated = calculateComprehensiveTargets(
@@ -82,10 +109,11 @@ export function ProfileTab({
       ageYears: typeof age === "number" && age > 0 ? age : 25,
       sex,
       activityLevel: activity,
+      goalWeightKg: typeof goalWeight === "number" && goalWeight > 0 ? goalWeight : undefined,
       isPregnantOrNursing: isSpecialPregnant,
       isUnder18: typeof age === "number" && age < 18,
     },
-    pace,
+    calculationOptions,
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -97,6 +125,15 @@ export function ProfileTab({
     setSavedSuccess(false);
 
     try {
+      let derivedPace: WeightLossPace = pace;
+      if (calculated.deficitPercent <= 17.5) {
+        derivedPace = "slow";
+      } else if (calculated.deficitPercent <= 22.5) {
+        derivedPace = "moderate";
+      } else {
+        derivedPace = "aggressive";
+      }
+
       await onSave(
         {
           email: profile.email,
@@ -113,7 +150,9 @@ export function ProfileTab({
           dailyCarbTargetG: calculated.macros.carbs,
           dailyFatTargetG: calculated.macros.fat,
           dailyFiberTargetG: calculated.macros.fiber,
-          weightLossPace: pace,
+          weightLossPace: derivedPace,
+          targetWeeks: calculated.timeline.targetWeeks,
+          targetDate: calculated.timeline.estimatedCompletionDate,
         },
       );
       setSavedSuccess(true);
@@ -313,32 +352,278 @@ export function ProfileTab({
             </div>
           </div>
 
-          {/* Weight loss pace */}
-          <div>
-            <label className="text-xs font-semibold text-stone-700">Tốc độ thâm hụt giảm mỡ:</label>
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {[
-                { id: "slow", label: "Chậm (15%)", desc: "Giữ cơ tối đa" },
-                { id: "moderate", label: "Vừa phải (20%)", desc: "Khuyên dùng chuẩn" },
-                { id: "aggressive", label: "Nhanh (25%)", desc: "Thâm hụt tối đa" },
-              ].map((p) => (
+          {/* Deficit Mode & Target Timeline Section */}
+          <div className="rounded-2xl border border-stone-200 bg-stone-50/70 p-4 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-200 pb-3">
+              <div>
+                <label className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
+                  <Clock className="h-4 w-4 text-emerald-600" />
+                  <span>Mục tiêu thâm hụt & Thời gian dự kiến về đích</span>
+                </label>
+                <p className="text-[11px] text-stone-500 mt-0.5">
+                  Bạn có thể chỉnh thời gian giảm cân mong muốn (calo thay đổi theo) hoặc chọn theo % thâm hụt
+                </p>
+              </div>
+
+              {/* Mode Toggle Tabs */}
+              <div className="flex items-center rounded-xl bg-stone-200/70 p-1 text-xs font-semibold self-start sm:self-auto">
                 <button
-                  key={p.id}
                   type="button"
-                  onClick={() => setPace(p.id as WeightLossPace)}
-                  className={`rounded-2xl p-2.5 text-center transition ${
-                    pace === p.id
-                      ? "bg-emerald-600 text-white shadow-sm"
-                      : "bg-stone-100 text-stone-700 hover:bg-stone-200"
+                  onClick={() => {
+                    setTargetMode("duration");
+                    if (!customWeeks && calculated.timeline.targetWeeks > 0) {
+                      setCustomWeeks(calculated.timeline.targetWeeks);
+                    }
+                  }}
+                  className={`rounded-lg px-3 py-1.5 transition ${
+                    targetMode === "duration"
+                      ? "bg-white text-emerald-800 shadow-sm"
+                      : "text-stone-600 hover:text-stone-900"
                   }`}
                 >
-                  <p className="text-xs font-bold">{p.label}</p>
-                  <p className={`text-[10px] ${pace === p.id ? "text-emerald-100" : "text-stone-500"}`}>
-                    {p.desc}
-                  </p>
+                  Theo Thời gian
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setTargetMode("pace")}
+                  className={`rounded-lg px-3 py-1.5 transition ${
+                    targetMode === "pace"
+                      ? "bg-white text-emerald-800 shadow-sm"
+                      : "text-stone-600 hover:text-stone-900"
+                  }`}
+                >
+                  Theo Tốc độ %
+                </button>
+              </div>
             </div>
+
+            {weightToLose <= 0 ? (
+              <div className="rounded-xl bg-white p-3 border border-stone-200 text-xs text-stone-600 text-center">
+                Mục tiêu cân nặng của bạn lớn hơn hoặc bằng cân nặng hiện tại (duy trì hoặc tăng cân).
+              </div>
+            ) : targetMode === "duration" ? (
+              /* DURATION ADJUSTMENT CONTROLS */
+              <div className="space-y-4">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xs font-semibold text-stone-700">
+                    Thời gian giảm cân mục tiêu:
+                  </span>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-xl font-black text-emerald-700">
+                      {customWeeks || calculated.timeline.targetWeeks}
+                    </span>
+                    <span className="text-xs font-bold text-stone-600">tuần</span>
+                    <span className="text-xs text-stone-400">
+                      (~{round((Number(customWeeks) || calculated.timeline.targetWeeks) / 4.33, 1)} tháng)
+                    </span>
+                  </div>
+                </div>
+
+                {/* Slider */}
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min={Math.max(8, Math.floor(calculated.timeline.minSafeWeeks * 0.7))}
+                    max={Math.max(104, calculated.timeline.minSafeWeeks + 52)}
+                    step={1}
+                    value={typeof customWeeks === "number" ? customWeeks : calculated.timeline.targetWeeks}
+                    onChange={(e) => setCustomWeeks(Number(e.target.value))}
+                    className="w-full accent-emerald-600 cursor-pointer h-2 bg-stone-200 rounded-lg"
+                  />
+                  <div className="flex justify-between text-[10px] text-stone-400 px-0.5">
+                    <span>Nhanh ({Math.max(8, Math.floor(calculated.timeline.minSafeWeeks * 0.7))} tuần)</span>
+                    <span>An toàn tối thiểu ({calculated.timeline.minSafeWeeks} tuần)</span>
+                    <span>Dài hạn ({Math.max(104, calculated.timeline.minSafeWeeks + 52)} tuần)</span>
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-semibold text-stone-600">Mốc thời gian gợi ý nhanh:</span>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCustomWeeks(calculated.timeline.minSafeWeeks)}
+                      className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold border transition ${
+                        customWeeks === calculated.timeline.minSafeWeeks
+                          ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                          : "bg-white text-stone-700 border-stone-200 hover:bg-stone-50"
+                      }`}
+                    >
+                      ⚡ Tối thiểu an toàn ({calculated.timeline.minSafeWeeks} tuần)
+                    </button>
+                    {calculated.timeline.minSafeWeeks <= 26 && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomWeeks(26)}
+                        className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold border transition ${
+                          customWeeks === 26
+                            ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                            : "bg-white text-stone-700 border-stone-200 hover:bg-stone-50"
+                        }`}
+                      >
+                        6 tháng (26 tuần)
+                      </button>
+                    )}
+                    {calculated.timeline.minSafeWeeks <= 39 && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomWeeks(39)}
+                        className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold border transition ${
+                          customWeeks === 39
+                            ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                            : "bg-white text-stone-700 border-stone-200 hover:bg-stone-50"
+                        }`}
+                      >
+                        9 tháng (39 tuần)
+                      </button>
+                    )}
+                    {calculated.timeline.minSafeWeeks <= 52 && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomWeeks(52)}
+                        className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold border transition ${
+                          customWeeks === 52
+                            ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                            : "bg-white text-stone-700 border-stone-200 hover:bg-stone-50"
+                        }`}
+                      >
+                        1 năm (52 tuần)
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setCustomWeeks(calculated.timeline.idealWeeks)}
+                      className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold border transition ${
+                        customWeeks === calculated.timeline.idealWeeks
+                          ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                          : "bg-white text-stone-700 border-stone-200 hover:bg-stone-50"
+                      }`}
+                    >
+                      🌿 Chuẩn bền vững ({calculated.timeline.idealWeeks} tuần)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Direct Number Input */}
+                <div className="flex items-center gap-2 pt-1">
+                  <label className="text-xs text-stone-600 whitespace-nowrap">Hoặc nhập số tuần cụ thể:</label>
+                  <input
+                    type="number"
+                    min="4"
+                    max="200"
+                    value={customWeeks}
+                    onChange={(e) => setCustomWeeks(e.target.value === "" ? "" : Number(e.target.value))}
+                    className="w-24 rounded-xl border border-stone-200 bg-white px-3 py-1.5 text-xs font-bold text-stone-900 focus:border-emerald-500 focus:outline-none"
+                  />
+                  <span className="text-xs text-stone-500">tuần</span>
+                </div>
+
+                {/* Live Real-Time Dynamic Feedback Card */}
+                <div className="rounded-xl bg-white p-3.5 border border-stone-200 space-y-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <span className="text-stone-500 block text-[11px]">Calo nạp mỗi ngày:</span>
+                      <span className="font-extrabold text-emerald-700 text-sm">
+                        {calculated.calorieTarget} kcal
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-stone-500 block text-[11px]">Thâm hụt mỗi ngày:</span>
+                      <span className="font-extrabold text-stone-800 text-sm">
+                        {calculated.deficitKcal} kcal ({calculated.deficitPercent}%)
+                      </span>
+                    </div>
+                    <div className="col-span-2 sm:col-span-1">
+                      <span className="text-stone-500 block text-[11px]">Tốc độ giảm mỡ:</span>
+                      <span className="font-bold text-stone-900 text-xs">
+                        ~{calculated.timeline.weeklyWeightChangeKg} kg / tuần
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-stone-100 flex items-center justify-between text-xs">
+                    <span className="text-stone-600 font-medium">Ngày dự kiến đạt {goalWeight}kg:</span>
+                    <span className="font-bold text-stone-900">
+                      {calculated.timeline.formattedCompletionDate}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Safety evaluation box */}
+                <div
+                  className={`rounded-xl p-3 text-xs leading-relaxed border ${
+                    calculated.timeline.safetyStatus === "dangerous_low_calorie"
+                      ? "bg-rose-50 border-rose-200 text-rose-800"
+                      : calculated.timeline.safetyStatus === "aggressive_warning"
+                      ? "bg-amber-50 border-amber-200 text-amber-800"
+                      : "bg-emerald-50 border-emerald-200 text-emerald-800"
+                  }`}
+                >
+                  <p>{calculated.timeline.safetyMessage}</p>
+                  {calculated.timeline.safetyStatus === "dangerous_low_calorie" && (
+                    <button
+                      type="button"
+                      onClick={() => setCustomWeeks(calculated.timeline.minSafeWeeks)}
+                      className="mt-2 inline-flex items-center gap-1 rounded-lg bg-rose-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-800 transition"
+                    >
+                      <span>Áp dụng thời gian an toàn tối ưu ({calculated.timeline.minSafeWeeks} tuần)</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* PACE SELECTION CONTROLS */
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: "slow", label: "Chậm (15%)", desc: "Giữ cơ tối đa" },
+                    { id: "moderate", label: "Vừa phải (20%)", desc: "Khuyên dùng chuẩn" },
+                    { id: "aggressive", label: "Nhanh (25%)", desc: "Thâm hụt tối đa" },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setPace(p.id as WeightLossPace);
+                      }}
+                      className={`rounded-2xl p-2.5 text-center transition ${
+                        pace === p.id
+                          ? "bg-emerald-600 text-white shadow-sm"
+                          : "bg-white text-stone-700 border border-stone-200 hover:bg-stone-100"
+                      }`}
+                    >
+                      <p className="text-xs font-bold">{p.label}</p>
+                      <p className={`text-[10px] ${pace === p.id ? "text-emerald-100" : "text-stone-500"}`}>
+                        {p.desc}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="rounded-xl bg-white p-3 border border-stone-200 text-xs space-y-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Thời gian dự kiến:</span>
+                    <span className="font-bold text-stone-900">
+                      {calculated.timeline.targetWeeks} tuần (~{calculated.timeline.targetMonths} tháng)
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Ngày về đích dự kiến:</span>
+                    <span className="font-bold text-emerald-700">
+                      {calculated.timeline.formattedCompletionDate}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Tốc độ giảm dự kiến:</span>
+                    <span className="font-semibold text-stone-800">
+                      ~{calculated.timeline.weeklyWeightChangeKg} kg / tuần
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Special Condition Checkbox */}
@@ -393,6 +678,72 @@ export function ProfileTab({
                 </span>
               </div>
             </div>
+
+            {/* Target Timeline Highlight Card */}
+            {weightToLose > 0 && (
+              <div className="rounded-2xl bg-white p-4 border border-emerald-200 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                    <Calendar className="h-4 w-4 text-emerald-600" />
+                    <span>Lộ trình dự kiến về đích</span>
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      calculated.timeline.safetyStatus === "dangerous_low_calorie"
+                        ? "bg-rose-100 text-rose-800"
+                        : calculated.timeline.safetyStatus === "aggressive_warning"
+                        ? "bg-amber-100 text-amber-800"
+                        : "bg-emerald-100 text-emerald-800"
+                    }`}
+                  >
+                    {calculated.timeline.safetyStatus === "dangerous_low_calorie"
+                      ? "Cần giãn thời gian"
+                      : calculated.timeline.safetyStatus === "aggressive_warning"
+                      ? "Tốc độ nhanh"
+                      : "Chuẩn an toàn"}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-xl bg-stone-50 p-2.5 border border-stone-100">
+                    <span className="text-[10px] text-stone-500 block">Cần giảm:</span>
+                    <span className="text-base font-black text-stone-900">
+                      {calculated.timeline.weightToLoseKg} kg
+                    </span>
+                  </div>
+                  <div className="rounded-xl bg-emerald-50/70 p-2.5 border border-emerald-100">
+                    <span className="text-[10px] text-emerald-800 block">Thời gian:</span>
+                    <span className="text-base font-black text-emerald-800">
+                      {calculated.timeline.targetWeeks} tuần
+                    </span>
+                    <span className="text-[10px] text-emerald-600 block">
+                      (~{calculated.timeline.targetMonths} tháng)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-stone-50/80 p-2.5 border border-stone-100 space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Ngày về đích:</span>
+                    <span className="font-bold text-emerald-800">
+                      {calculated.timeline.formattedCompletionDate}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Tốc độ giảm:</span>
+                    <span className="font-semibold text-stone-800">
+                      ~{calculated.timeline.weeklyWeightChangeKg} kg/tuần
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-stone-500">Thâm hụt mỗi ngày:</span>
+                    <span className="font-semibold text-stone-800">
+                      {calculated.deficitKcal} kcal ({calculated.deficitPercent}%)
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Target Macros Breakdown */}
             <div className="rounded-2xl bg-white p-4 border border-emerald-100 space-y-2">

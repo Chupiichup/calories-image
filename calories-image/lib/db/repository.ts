@@ -34,6 +34,8 @@ export type StoredGoal = {
   dailyFiberTargetG: number;
   weightLossPace: WeightLossPace;
   updatedAt: string;
+  targetWeeks?: number;
+  targetDate?: string;
 };
 
 export type StoredMealItem = {
@@ -319,6 +321,7 @@ export const repository = {
             activityLevel: profile.activity_level,
             updatedAt: profile.updated_at,
           };
+          const localG = getStorage<StoredGoal>("goal", DEFAULT_GOAL);
           const resolvedGoal: StoredGoal = {
             id: goal.id,
             userId: goal.user_id,
@@ -330,6 +333,8 @@ export const repository = {
             dailyFatTargetG: Number(goal.daily_fat_target_g),
             dailyFiberTargetG: Number(goal.daily_fiber_target_g),
             weightLossPace: goal.weight_loss_pace,
+            targetWeeks: localG?.targetWeeks,
+            targetDate: localG?.targetDate,
             updatedAt: goal.updated_at,
           };
 
@@ -371,6 +376,9 @@ export const repository = {
           updated_at: new Date().toISOString(),
         });
 
+        const validPaces = ["slow", "moderate", "aggressive"];
+        const dbPace = validPaces.includes(goalInput.weightLossPace) ? goalInput.weightLossPace : "moderate";
+
         const { data: goalData } = await supabase
           .from("nutrition_goals")
           .insert({
@@ -382,12 +390,18 @@ export const repository = {
             daily_carbohydrate_target_g: goalInput.dailyCarbTargetG,
             daily_fat_target_g: goalInput.dailyFatTargetG,
             daily_fiber_target_g: goalInput.dailyFiberTargetG,
-            weight_loss_pace: goalInput.weightLossPace,
+            weight_loss_pace: dbPace,
           })
           .select()
           .single();
 
-        return this.getProfile();
+        const res = await this.getProfile();
+        if (res.goal) {
+          res.goal.targetWeeks = goalInput.targetWeeks;
+          res.goal.targetDate = goalInput.targetDate;
+          setStorage("goal", res.goal);
+        }
+        return res;
       }
     }
 

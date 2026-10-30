@@ -41,6 +41,28 @@ export type UserProfileInput = {
   isUnder18?: boolean;
 };
 
+export type WeightLossTimeline = {
+  weightToLoseKg: number;
+  totalDeficitNeededKcal: number;
+  targetWeeks: number;
+  targetDays: number;
+  targetMonths: number;
+  estimatedCompletionDate: string; // YYYY-MM-DD
+  formattedCompletionDate: string; // e.g. "Thứ 6, 28/05/2027"
+  weeklyWeightChangeKg: number;
+  safetyStatus: "safe" | "moderate" | "aggressive_warning" | "dangerous_low_calorie" | "maintenance" | "surplus";
+  safetyMessage: string;
+  minSafeWeeks: number;
+  minSafeCalorieFloor: number;
+  idealWeeks: number;
+};
+
+export type TargetCalculationOptions = {
+  pace?: WeightLossPace;
+  targetWeeks?: number;
+  customCalorieTarget?: number;
+};
+
 export type TargetCalculationResult = {
   bmi: number;
   bmiCategory: string;
@@ -57,6 +79,7 @@ export type TargetCalculationResult = {
   };
   warnings: string[];
   explanation: string;
+  timeline: WeightLossTimeline;
 };
 
 export type WeightEntry = {
@@ -179,12 +202,118 @@ export function calculateTdee(params: {
 }
 
 /**
+ * Calculates timeline and estimated completion date for weight goals
+ */
+export function calculateWeightLossTimeline(params: {
+  currentWeightKg: number;
+  goalWeightKg?: number;
+  tdee: number;
+  calorieTarget: number;
+  sex?: BiologicalSex;
+  desiredWeeks?: number;
+}): WeightLossTimeline {
+  const current = Number(params.currentWeightKg) || 0;
+  const goal = typeof params.goalWeightKg === "number" && params.goalWeightKg > 0 ? params.goalWeightKg : current;
+  const weightToLoseKg = Math.max(0, round(current - goal, 1));
+  const totalDeficitNeededKcal = Math.round(weightToLoseKg * 7700);
+  const minSafeCalorieFloor = params.sex === "female" ? 1200 : 1400;
+
+  const dailyDeficit = Math.round(Math.max(0, params.tdee - params.calorieTarget));
+  const maxSafeDailyDeficit = Math.max(100, Math.min(1000, Math.max(0, params.tdee - minSafeCalorieFloor)));
+  const minSafeWeeks = maxSafeDailyDeficit > 0 && totalDeficitNeededKcal > 0
+    ? Math.ceil(totalDeficitNeededKcal / (maxSafeDailyDeficit * 7))
+    : 1;
+  const idealWeeks = totalDeficitNeededKcal > 0
+    ? Math.ceil(totalDeficitNeededKcal / (Math.min(maxSafeDailyDeficit, 550) * 7))
+    : 1;
+
+  let targetWeeks = 0;
+  let targetDays = 0;
+  let weeklyWeightChangeKg = 0;
+
+  if (weightToLoseKg <= 0) {
+    targetWeeks = 0;
+    targetDays = 0;
+    weeklyWeightChangeKg = 0;
+  } else if (params.desiredWeeks && params.desiredWeeks > 0) {
+    targetWeeks = Math.max(1, Math.round(params.desiredWeeks));
+    targetDays = targetWeeks * 7;
+    weeklyWeightChangeKg = round(weightToLoseKg / targetWeeks, 2);
+  } else if (dailyDeficit > 0) {
+    targetDays = Math.ceil(totalDeficitNeededKcal / dailyDeficit);
+    targetWeeks = Math.max(1, Math.round(targetDays / 7));
+    weeklyWeightChangeKg = round((dailyDeficit * 7) / 7700, 2);
+  } else {
+    targetWeeks = minSafeWeeks;
+    targetDays = targetWeeks * 7;
+    weeklyWeightChangeKg = 0;
+  }
+
+  const targetMonths = round(targetWeeks / 4.33, 1);
+  const dateObj = new Date(Date.now() + targetDays * 86400000);
+  const estimatedCompletionDate = dateObj.toISOString().split("T")[0];
+  const formattedCompletionDate = dateObj.toLocaleDateString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+
+  let safetyStatus: WeightLossTimeline["safetyStatus"] = "safe";
+  let safetyMessage = "";
+
+  const theoreticalDailyDeficit = targetDays > 0 ? Math.round(totalDeficitNeededKcal / targetDays) : 0;
+  const theoreticalCalorie = params.tdee - theoreticalDailyDeficit;
+
+  if (weightToLoseKg <= 0) {
+    safetyStatus = current === goal ? "maintenance" : "surplus";
+    safetyMessage = current === goal ? "Mục tiêu duy trì cân nặng ổn định." : "Mục tiêu tăng cân / phát triển cơ bắp.";
+  } else if (
+    params.calorieTarget < minSafeCalorieFloor ||
+    theoreticalCalorie < minSafeCalorieFloor ||
+    weeklyWeightChangeKg > 1.5
+  ) {
+    safetyStatus = "dangerous_low_calorie";
+    safetyMessage = `⚠️ Nguy hiểm: Thời gian ${targetWeeks} tuần đòi hỏi thâm hụt quá lớn (${theoreticalDailyDeficit} kcal/ngày), khiến calo nạp thực tế tụt xuống dưới sàn an toàn y khoa (${minSafeCalorieFloor} kcal/ngày). Tốc độ này (${weeklyWeightChangeKg} kg/tuần) dễ gây kiệt sức, mất cơ và suy giảm trao đổi chất. Hãy tăng thời gian lên tối thiểu ${minSafeWeeks} tuần.`;
+  } else if (weeklyWeightChangeKg > 1.0) {
+    safetyStatus = "aggressive_warning";
+    safetyMessage = `⚠️ Tốc độ giảm ${weeklyWeightChangeKg} kg/tuần khá nhanh (vượt 1kg/tuần). Cần đảm bảo nạp đủ đạm tối thiểu 2g/kg và bổ sung đủ vi chất.`;
+  } else if (weeklyWeightChangeKg >= 0.4) {
+    safetyStatus = "safe";
+    safetyMessage = `✅ Tốc độ giảm ${weeklyWeightChangeKg} kg/tuần chuẩn khoa học, tối ưu để giảm mỡ và bảo tồn cơ bắp bền vững.`;
+  } else {
+    safetyStatus = "moderate";
+    safetyMessage = `🌿 Tốc độ giảm nhẹ nhàng (~${weeklyWeightChangeKg} kg/tuần), cực kỳ thoải mái và dễ dàng duy trì lâu dài.`;
+  }
+
+  return {
+    weightToLoseKg,
+    totalDeficitNeededKcal,
+    targetWeeks,
+    targetDays,
+    targetMonths,
+    estimatedCompletionDate,
+    formattedCompletionDate,
+    weeklyWeightChangeKg,
+    safetyStatus,
+    safetyMessage,
+    minSafeWeeks,
+    minSafeCalorieFloor,
+    idealWeeks,
+  };
+}
+
+/**
  * Calculates evidence-based safe calorie and macro targets for fat loss while sparing muscle mass.
  */
 export function calculateComprehensiveTargets(
   input: UserProfileInput,
-  pace: WeightLossPace = "moderate",
+  paceOrOptions: WeightLossPace | TargetCalculationOptions = "moderate",
 ): TargetCalculationResult {
+  const options: TargetCalculationOptions =
+    typeof paceOrOptions === "string" ? { pace: paceOrOptions } : paceOrOptions;
+  const pace = options.pace ?? "moderate";
   const warnings: string[] = [];
 
   // Special population safety checks
@@ -203,19 +332,37 @@ export function calculateComprehensiveTargets(
   const bmr = calculateBmr(input);
   const tdee = calculateTdee({ bmr, activityLevel: input.activityLevel });
 
-  // Deficit percentage based on pace:
-  // slow: 15% (bảo toàn cơ bắp tối đa, giảm mỡ từ từ)
-  // moderate: 20% (chuẩn khuyến nghị thể hình & y học)
-  // aggressive: 25% (tối đa an toàn, không nên vượt quá)
-  const deficitRate = pace === "slow" ? 0.15 : pace === "moderate" ? 0.20 : 0.25;
+  // Calculate weightToLose
+  const goalWeight = typeof input.goalWeightKg === "number" && input.goalWeightKg > 0 ? input.goalWeightKg : input.weightKg;
+  const weightToLose = Math.max(0, input.weightKg - goalWeight);
+  const totalDeficitNeeded = weightToLose * 7700;
 
-  const rawCalorieTarget = tdee * (1 - deficitRate);
+  // Determine raw calorie target based on mode
+  let rawCalorieTarget: number;
+  if (typeof options.targetWeeks === "number" && options.targetWeeks > 0 && weightToLose > 0) {
+    const targetDays = Math.max(7, options.targetWeeks * 7);
+    const dailyDeficitNeeded = Math.round(totalDeficitNeeded / targetDays);
+    rawCalorieTarget = tdee - dailyDeficitNeeded;
+  } else if (typeof options.customCalorieTarget === "number" && options.customCalorieTarget > 0) {
+    rawCalorieTarget = options.customCalorieTarget;
+  } else {
+    const deficitRate = pace === "slow" ? 0.15 : pace === "moderate" ? 0.20 : 0.25;
+    rawCalorieTarget = tdee * (1 - deficitRate);
+  }
 
   // Safety floor: Protect against starvation response & metabolic slowdown
-  // Minimum 1500 kcal for biological males, 1200 kcal for females, or 25 kcal/kg
+  // Minimum 1200 kcal for biological females, 1400 kcal for biological males.
+  // Weight floor protects lean body mass (using target weight if overweight, not excess adipose tissue)
   const sexFloor = input.sex === "female" ? 1200 : 1400;
-  const weightFloor = 22 * input.weightKg;
-  const absoluteSafetyFloor = Math.max(sexFloor, weightFloor);
+  const targetWeightRef = input.goalWeightKg && input.goalWeightKg > 0 ? Math.min(input.weightKg, input.goalWeightKg) : input.weightKg;
+  const weightFloor = Math.min(22 * targetWeightRef, Math.round(tdee * 0.8));
+  const absoluteSafetyFloor = Math.max(sexFloor, Math.round(weightFloor));
+
+  if (rawCalorieTarget < absoluteSafetyFloor && weightToLose > 0) {
+    warnings.push(
+      `Mục tiêu thời gian bạn chọn đòi hỏi mức thâm hụt quá lớn, khiến calo nạp (${Math.round(rawCalorieTarget)} kcal) thấp hơn sàn an toàn y học (${absoluteSafetyFloor} kcal/ngày). Ứng dụng đã tự động giữ calo ở mức an toàn tối thiểu ${absoluteSafetyFloor} kcal để bảo vệ sức khỏe.`,
+    );
+  }
 
   let finalCalorieTarget = Math.round(Math.max(rawCalorieTarget, absoluteSafetyFloor));
 
@@ -241,6 +388,16 @@ export function calculateComprehensiveTargets(
 
   const fiberG = Math.round(Math.max(25, (finalCalorieTarget / 1000) * 14));
 
+  // Compute timeline
+  const timeline = calculateWeightLossTimeline({
+    currentWeightKg: input.weightKg,
+    goalWeightKg: input.goalWeightKg,
+    tdee,
+    calorieTarget: finalCalorieTarget,
+    sex: input.sex,
+    desiredWeeks: options.targetWeeks,
+  });
+
   const explanation = `Mục tiêu dinh dưỡng được thiết kế theo công thức Mifflin-St Jeor với mức thâm hụt ${actualDeficitPercent}% TDEE (~${actualDeficitKcal} kcal/ngày). Lượng protein được đặt ở mức ${round(proteinG / input.weightKg, 1)}g/kg để bảo toàn tối đa khối lượng cơ bắp trong quá trình giảm mỡ.`;
 
   return {
@@ -259,6 +416,7 @@ export function calculateComprehensiveTargets(
     },
     warnings,
     explanation,
+    timeline,
   };
 }
 

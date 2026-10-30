@@ -134,6 +134,12 @@ export function WeightTab({
           <p className="mt-2 text-xs text-stone-500">
             Còn lại: <strong>{round(Math.abs(trend.latest - goal.goalWeightKg), 1)} kg</strong> để đạt mục tiêu vóc dáng.
           </p>
+          {goal.targetWeeks && (
+            <p className="mt-1.5 text-xs font-semibold text-emerald-700 flex items-center gap-1">
+              <Calendar className="h-3.5 w-3.5 text-emerald-600" />
+              <span>Dự kiến: ~{goal.targetWeeks} tuần {goal.targetDate ? `(${goal.targetDate})` : ""}</span>
+            </p>
+          )}
         </div>
 
         {/* Weekly Trend Rate */}
