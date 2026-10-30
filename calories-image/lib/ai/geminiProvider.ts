@@ -18,7 +18,7 @@ export class GeminiVisionProvider implements IAiVisionProvider {
   private apiKey: string;
   private timeoutMs: number;
 
-  constructor(apiKey: string, modelName = "gemini-2.5-flash", timeoutMs = 30000) {
+  constructor(apiKey: string, modelName = "gemini-2.5-flash", timeoutMs = 45000) {
     this.apiKey = (apiKey || "").trim().replace(/^["']|["']$/g, "");
     this.modelName = (modelName || "gemini-2.5-flash")
       .trim()
@@ -189,11 +189,19 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
             "x-goog-api-key": cleanKey,
           },
           signal: controller.signal,
+          const genConfig: Record<string, any> = {
+            responseMimeType: "application/json",
+            temperature: 0.2,
+          };
+
+          // Gemini 2.5 enables deep chain-of-thought thinking by default, which can take 30+ seconds.
+          // Setting thinkingBudget: 0 disables unnecessary reasoning tokens, reducing latency to 1-2 seconds.
+          if (attempt.shortName.includes("2.5") || attempt.shortName.includes("flash")) {
+            genConfig.thinkingConfig = { thinkingBudget: 0 };
+          }
+
           body: JSON.stringify({
-            generationConfig: {
-              responseMimeType: "application/json",
-              temperature: 0.2,
-            },
+            generationConfig: genConfig,
             contents: [
               {
                 parts: [
@@ -238,18 +246,21 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         lastError = err;
         console.warn(`Attempt with ${attempt.version}/${attempt.shortName} failed: ${err.message}`);
         
-        // If 404 or 429 quota limit exceeded for this specific model, continue to next candidate!
+        // If 404, 429 quota limit, or timeout/abort for this specific model, continue to next candidate!
         if (
           err.message &&
           (err.message.includes("404") ||
             err.message.includes("not found") ||
             err.message.includes("429") ||
             err.message.includes("quota") ||
-            err.message.includes("RESOURCE_EXHAUSTED"))
+            err.message.includes("RESOURCE_EXHAUSTED") ||
+            err.message.includes("aborted") ||
+            err.message.includes("abort") ||
+            err.message.includes("timeout"))
         ) {
           continue;
         }
-        // If it's a fatal error like 400 or 403 or abort, break out and throw
+        // If it's a fatal error like 400 or 403, break out and throw
         break;
       } finally {
         clearTimeout(timeout);

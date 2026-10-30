@@ -79,19 +79,52 @@ export function MealLoggerModal({
 
   if (!isOpen) return null;
 
-  // Handle Image Upload / Take Photo
+  // Handle Image Upload / Take Photo with client-side optimization
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        setAnalysisError("Kích thước tệp vượt quá 5MB. Vui lòng chọn ảnh nhỏ hơn.");
+      if (file.size > 15 * 1024 * 1024) {
+        setAnalysisError("Kích thước tệp vượt quá 15MB. Vui lòng chọn ảnh nhỏ hơn.");
         return;
       }
-      setSelectedImageFile(file);
       const reader = new FileReader();
       reader.onload = () => {
-        setSelectedImage(reader.result as string);
-        setAnalysisError(null);
+        const img = new Image();
+        img.onload = () => {
+          // Resize to max 1280px to optimize upload speed and AI vision latency
+          const maxDim = 1280;
+          let width = img.width;
+          let height = img.height;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const optimizedBase64 = canvas.toDataURL("image/jpeg", 0.85);
+            setSelectedImage(optimizedBase64);
+            setSelectedImageFile(null); // Direct use of optimized data URL
+          } else {
+            setSelectedImage(reader.result as string);
+            setSelectedImageFile(file);
+          }
+          setAnalysisError(null);
+        };
+        img.onerror = () => {
+          setSelectedImage(reader.result as string);
+          setSelectedImageFile(file);
+          setAnalysisError(null);
+        };
+        img.src = reader.result as string;
       };
       reader.readAsDataURL(file);
     }
