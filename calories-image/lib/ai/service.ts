@@ -15,7 +15,7 @@ export function getAiVisionProvider(): IAiVisionProvider {
   if (env.AI_PROVIDER === "gemini") {
     return new GeminiVisionProvider(
       env.AI_PROVIDER_API_KEY,
-      env.AI_PROVIDER_MODEL || "gemini-1.5-flash",
+      env.AI_PROVIDER_MODEL || "gemini-2.5-flash",
       env.AI_PROVIDER_TIMEOUT_MS,
     );
   }

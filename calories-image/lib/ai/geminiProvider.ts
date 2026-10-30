@@ -18,9 +18,9 @@ export class GeminiVisionProvider implements IAiVisionProvider {
   private apiKey: string;
   private timeoutMs: number;
 
-  constructor(apiKey: string, modelName = "gemini-1.5-flash", timeoutMs = 30000) {
+  constructor(apiKey: string, modelName = "gemini-2.5-flash", timeoutMs = 30000) {
     this.apiKey = (apiKey || "").trim().replace(/^["']|["']$/g, "");
-    this.modelName = (modelName || "gemini-1.5-flash")
+    this.modelName = (modelName || "gemini-2.5-flash")
       .trim()
       .replace(/^["']|["']$/g, "")
       .replace(/^models\//, "");
@@ -82,7 +82,7 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         if (!listRes.ok) {
           if (listData?.error?.message) {
             listErrorMessage = `[${ver}] ${listData.error.message}`;
-            // If the error is fatal (invalid key, project disabled, permission denied, location not supported)
+            // If the error is fatal (invalid key, project disabled, permission denied)
             if (
               listRes.status === 400 ||
               listRes.status === 403 ||
@@ -125,49 +125,50 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
 
     // Step 2: Filter and sort candidates to prioritize best vision model
     if (candidateModels.length > 0) {
-      const isSpecializedNonVision = (name: string) =>
-        /tts|transcribe|audio|speech|robotics|computer-use|banana|clip|argon/i.test(name);
+      // Exclude preview-image, audio, tts, robotics, tool-only models
+      const isUnsuitableModel = (name: string) =>
+        /tts|transcribe|audio|speech|robotics|computer-use|banana|clip|argon|preview-image|-image\b/i.test(name);
+
+      candidateModels = candidateModels.filter((c) => !isUnsuitableModel(c.shortName));
 
       candidateModels.sort((a, b) => {
         let scoreA = 0;
         let scoreB = 0;
 
-        if (isSpecializedNonVision(a.shortName)) scoreA -= 200;
-        if (isSpecializedNonVision(b.shortName)) scoreB -= 200;
-
         if (a.shortName === this.modelName || a.shortName.includes(this.modelName)) scoreA += 100;
         if (b.shortName === this.modelName || b.shortName.includes(this.modelName)) scoreB += 100;
 
-        if (a.shortName.includes("gemini-2.5-flash")) scoreA += 50;
-        if (b.shortName.includes("gemini-2.5-flash")) scoreB += 50;
+        // Standard Flash models have the highest free tier availability
+        if (a.shortName === "gemini-2.5-flash") scoreA += 80;
+        if (b.shortName === "gemini-2.5-flash") scoreB += 80;
 
-        if (a.shortName.includes("flash-latest")) scoreA += 45;
-        if (b.shortName.includes("flash-latest")) scoreB += 45;
+        if (a.shortName === "gemini-flash-latest") scoreA += 70;
+        if (b.shortName === "gemini-flash-latest") scoreB += 70;
 
-        if (a.shortName.includes("flash-image")) scoreA += 40;
-        if (b.shortName.includes("flash-image")) scoreB += 40;
+        if (a.shortName === "gemini-2.5-flash-lite") scoreA += 60;
+        if (b.shortName === "gemini-2.5-flash-lite") scoreB += 60;
+
+        if (a.shortName === "gemini-flash-lite-latest") scoreA += 50;
+        if (b.shortName === "gemini-flash-lite-latest") scoreB += 50;
 
         if (a.shortName.includes("flash")) scoreA += 30;
         if (b.shortName.includes("flash")) scoreB += 30;
 
-        if (a.shortName.includes("2.5")) scoreA += 15;
-        if (b.shortName.includes("2.5")) scoreB += 15;
-
-        if (a.shortName.includes("pro-latest") || a.shortName.includes("2.5-pro")) scoreA += 10;
-        if (b.shortName.includes("pro-latest") || b.shortName.includes("2.5-pro")) scoreB += 10;
+        if (a.shortName === "gemini-pro-latest" || a.shortName === "gemini-2.5-pro") scoreA += 20;
+        if (b.shortName === "gemini-pro-latest" || b.shortName === "gemini-2.5-pro") scoreB += 20;
 
         return scoreB - scoreA;
       });
     } else {
-      // Fallback static list if ListModels didn't return (e.g. strict corporate proxy)
+      // Fallback static list
       candidateModels = [
-        { version: "v1beta", fullName: "models/gemini-2.0-flash", shortName: "gemini-2.0-flash" },
-        { version: "v1beta", fullName: "models/gemini-1.5-flash", shortName: "gemini-1.5-flash" },
-        { version: "v1", fullName: "models/gemini-1.5-flash", shortName: "gemini-1.5-flash" },
         { version: "v1beta", fullName: "models/gemini-2.5-flash", shortName: "gemini-2.5-flash" },
-        { version: "v1beta", fullName: "models/gemini-1.5-flash-latest", shortName: "gemini-1.5-flash-latest" },
-        { version: "v1", fullName: "models/gemini-1.5-pro", shortName: "gemini-1.5-pro" },
-        { version: "v1beta", fullName: "models/gemini-1.5-pro", shortName: "gemini-1.5-pro" },
+        { version: "v1beta", fullName: "models/gemini-flash-latest", shortName: "gemini-flash-latest" },
+        { version: "v1beta", fullName: "models/gemini-2.5-flash-lite", shortName: "gemini-2.5-flash-lite" },
+        { version: "v1beta", fullName: "models/gemini-flash-lite-latest", shortName: "gemini-flash-lite-latest" },
+        { version: "v1", fullName: "models/gemini-2.5-flash", shortName: "gemini-2.5-flash" },
+        { version: "v1beta", fullName: "models/gemini-pro-latest", shortName: "gemini-pro-latest" },
+        { version: "v1beta", fullName: "models/gemini-2.5-pro", shortName: "gemini-2.5-pro" },
       ];
     }
 
@@ -236,8 +237,16 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
       } catch (err: any) {
         lastError = err;
         console.warn(`Attempt with ${attempt.version}/${attempt.shortName} failed: ${err.message}`);
-        // If it was a 404, try next candidate model/version
-        if (err.message && (err.message.includes("404") || err.message.includes("not found"))) {
+        
+        // If 404 or 429 quota limit exceeded for this specific model, continue to next candidate!
+        if (
+          err.message &&
+          (err.message.includes("404") ||
+            err.message.includes("not found") ||
+            err.message.includes("429") ||
+            err.message.includes("quota") ||
+            err.message.includes("RESOURCE_EXHAUSTED"))
+        ) {
           continue;
         }
         // If it's a fatal error like 400 or 403 or abort, break out and throw
@@ -245,6 +254,12 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
       } finally {
         clearTimeout(timeout);
       }
+    }
+
+    if (lastError?.message && (lastError.message.includes("429") || lastError.message.includes("RESOURCE_EXHAUSTED"))) {
+      throw new Error(
+        "Tài khoản Google Gemini đã tạm thời hết lượt yêu cầu miễn phí trong ngày (mã 429: Quota exceeded). Bạn có thể bấm '+ Nhập thủ công' ở góc trên để lưu bữa ăn ngay bây giờ, hoặc thử lại sau khi Google làm mới lượt."
+      );
     }
 
     if (listErrorMessage && lastError?.message && lastError.message.includes("404")) {
