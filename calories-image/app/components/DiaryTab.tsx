@@ -11,7 +11,7 @@ import {
   Sparkles,
   Flame,
 } from "lucide-react";
-import type { StoredMeal, StoredGoal } from "@/lib/db/repository";
+import { StoredMeal, StoredGoal, getLocalDateString } from "@/lib/db/repository";
 import { round } from "@/lib/nutrition";
 
 interface DiaryTabProps {
@@ -33,19 +33,19 @@ export function DiaryTab({
 }: DiaryTabProps) {
   // Navigation helpers for dates
   const handlePrevDay = () => {
-    const current = new Date(selectedDate);
+    const current = new Date(`${selectedDate}T12:00:00`);
     current.setDate(current.getDate() - 1);
-    onDateChange(current.toISOString().split("T")[0]);
+    onDateChange(getLocalDateString(current));
   };
 
   const handleNextDay = () => {
-    const current = new Date(selectedDate);
+    const current = new Date(`${selectedDate}T12:00:00`);
     current.setDate(current.getDate() + 1);
-    onDateChange(current.toISOString().split("T")[0]);
+    onDateChange(getLocalDateString(current));
   };
 
   const handleToday = () => {
-    onDateChange(new Date().toISOString().split("T")[0]);
+    onDateChange(getLocalDateString());
   };
 
   // Group meals by mealType

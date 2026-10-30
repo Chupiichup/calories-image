@@ -9,7 +9,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { SEED_FOODS, type FoodItem } from "@/lib/data/seedFoods";
-import type { BiologicalSex, ActivityLevel, WeightLossPace, NutritionValues } from "@/lib/nutrition";
+import { round, type BiologicalSex, type ActivityLevel, type WeightLossPace, type NutritionValues } from "@/lib/nutrition";
 
 export type StoredProfile = {
   id: string;
@@ -99,26 +99,51 @@ const DEFAULT_WEIGHT_ENTRIES: StoredWeightEntry[] = [];
 
 const DEFAULT_MEALS: StoredMeal[] = [];
 
+// Helper to validate standard UUID v4 format
+export function isValidUUID(val?: string | null): boolean {
+  if (!val) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+}
+
+// Helper to get local YYYY-MM-DD date string according to device timezone
+export function getLocalDateString(dateInput: Date | string = new Date()): string {
+  const d = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
+  if (isNaN(d.getTime())) {
+    return new Date().toISOString().split("T")[0];
+  }
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 // Helper to check if running in browser
 const isBrowser = typeof window !== "undefined";
 
+// In-memory store fallback for SSR & testing environments
+const memoryStore = new Map<string, any>();
+
 function getStorage<T>(key: string, fallback: T): T {
-  if (!isBrowser) return fallback;
-  try {
-    const val = localStorage.getItem(`calories_image_${key}`);
-    return val ? JSON.parse(val) : fallback;
-  } catch {
-    return fallback;
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      const val = window.localStorage.getItem(`calories_image_${key}`);
+      return val ? JSON.parse(val) : fallback;
+    } catch {
+      return fallback;
+    }
   }
+  return memoryStore.has(key) ? (memoryStore.get(key) as T) : fallback;
 }
 
 function setStorage<T>(key: string, val: T): void {
-  if (!isBrowser) return;
-  try {
-    localStorage.setItem(`calories_image_${key}`, JSON.stringify(val));
-  } catch (err) {
-    console.error("Local storage error:", err);
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      window.localStorage.setItem(`calories_image_${key}`, JSON.stringify(val));
+    } catch (err) {
+      console.error("Local storage error:", err);
+    }
   }
+  memoryStore.set(key, val);
 }
 
 export const repository = {
@@ -251,10 +276,13 @@ export const repository = {
       } = await supabase.auth.getUser();
 
       if (user) {
-        const start = `${dateString}T00:00:00.000Z`;
-        const end = `${dateString}T23:59:59.999Z`;
+        // Calculate timezone-aware local start and end of day
+        const localStart = new Date(`${dateString}T00:00:00`);
+        const localEnd = new Date(`${dateString}T23:59:59.999`);
+        const start = isNaN(localStart.getTime()) ? `${dateString}T00:00:00.000Z` : localStart.toISOString();
+        const end = isNaN(localEnd.getTime()) ? `${dateString}T23:59:59.999Z` : localEnd.toISOString();
 
-        const { data: meals } = await supabase
+        const { data: meals, error: mealsErr } = await supabase
           .from("meals")
           .select("*, meal_items(*)")
           .eq("user_id", user.id)
@@ -262,16 +290,14 @@ export const repository = {
           .lte("eaten_at", end)
           .order("eaten_at", { ascending: true });
 
-        if (meals) {
-          return meals.map((m) => ({
-            id: m.id,
-            userId: m.user_id,
-            eatenAt: m.eaten_at,
-            mealType: m.meal_type,
-            notes: m.notes,
-            analysisStatus: m.analysis_status,
-            createdAt: m.created_at,
-            items: (m.meal_items || []).map((it: any) => ({
+        if (mealsErr) {
+          console.error("Supabase getMealsForDate error:", mealsErr);
+        }
+
+        if (meals && !mealsErr) {
+          const localMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
+          return meals.map((m) => {
+            let mappedItems = (m.meal_items || []).map((it: any) => ({
               id: it.id,
               mealId: it.meal_id,
               foodId: it.food_id,
@@ -285,8 +311,30 @@ export const repository = {
               nutritionSource: it.nutrition_source,
               isAiEstimated: it.is_ai_estimated,
               confidence: it.confidence ? Number(it.confidence) : undefined,
-            })),
-          }));
+            }));
+
+            // Fallback recovery: if meal_items is empty in DB (e.g. from previously failed UUID insert),
+            // recover full items and macros from local backup
+            if (mappedItems.length === 0) {
+              const matched = localMeals.find(
+                (lm) => lm.id === m.id || lm.eatenAt === m.eaten_at,
+              );
+              if (matched && matched.items && matched.items.length > 0) {
+                mappedItems = matched.items;
+              }
+            }
+
+            return {
+              id: m.id,
+              userId: m.user_id,
+              eatenAt: m.eaten_at,
+              mealType: m.meal_type,
+              notes: m.notes,
+              analysisStatus: m.analysis_status,
+              createdAt: m.created_at,
+              items: mappedItems,
+            };
+          });
         }
       }
     }
@@ -296,7 +344,7 @@ export const repository = {
     if (cleaned.length !== allMeals.length) {
       setStorage("meals", cleaned);
     }
-    return cleaned.filter((m) => m.eatenAt.startsWith(dateString));
+    return cleaned.filter((m) => getLocalDateString(m.eatenAt) === dateString);
   },
 
   async getAllMeals(): Promise<StoredMeal[]> {
@@ -307,22 +355,20 @@ export const repository = {
       } = await supabase.auth.getUser();
 
       if (user) {
-        const { data: meals } = await supabase
+        const { data: meals, error: mealsErr } = await supabase
           .from("meals")
           .select("*, meal_items(*)")
           .eq("user_id", user.id)
           .order("eaten_at", { ascending: false });
 
-        if (meals) {
-          return meals.map((m) => ({
-            id: m.id,
-            userId: m.user_id,
-            eatenAt: m.eaten_at,
-            mealType: m.meal_type,
-            notes: m.notes,
-            analysisStatus: m.analysis_status,
-            createdAt: m.created_at,
-            items: (m.meal_items || []).map((it: any) => ({
+        if (mealsErr) {
+          console.error("Supabase getAllMeals error:", mealsErr);
+        }
+
+        if (meals && !mealsErr) {
+          const localMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
+          return meals.map((m) => {
+            let mappedItems = (m.meal_items || []).map((it: any) => ({
               id: it.id,
               mealId: it.meal_id,
               foodId: it.food_id,
@@ -336,8 +382,28 @@ export const repository = {
               nutritionSource: it.nutrition_source,
               isAiEstimated: it.is_ai_estimated,
               confidence: it.confidence ? Number(it.confidence) : undefined,
-            })),
-          }));
+            }));
+
+            if (mappedItems.length === 0) {
+              const matched = localMeals.find(
+                (lm) => lm.id === m.id || lm.eatenAt === m.eaten_at,
+              );
+              if (matched && matched.items && matched.items.length > 0) {
+                mappedItems = matched.items;
+              }
+            }
+
+            return {
+              id: m.id,
+              userId: m.user_id,
+              eatenAt: m.eaten_at,
+              mealType: m.meal_type,
+              notes: m.notes,
+              analysisStatus: m.analysis_status,
+              createdAt: m.created_at,
+              items: mappedItems,
+            };
+          });
         }
       }
     }
@@ -371,15 +437,15 @@ export const repository = {
       mealId,
       foodId: it.foodId,
       foodNameSnapshot: it.foodName,
-      portionG: it.portionG,
-      calories: it.nutrition.calories,
-      protein: it.nutrition.protein,
-      carbs: it.nutrition.carbs,
-      fat: it.nutrition.fat,
-      fiber: it.nutrition.fiber,
+      portionG: Math.max(1, round(it.portionG || 100, 1)),
+      calories: Math.max(0, round(it.nutrition?.calories || 0, 1)),
+      protein: Math.max(0, round(it.nutrition?.protein || 0, 1)),
+      carbs: Math.max(0, round(it.nutrition?.carbs || 0, 1)),
+      fat: Math.max(0, round(it.nutrition?.fat || 0, 1)),
+      fiber: Math.max(0, round(it.nutrition?.fiber || 0, 1)),
       nutritionSource: it.nutritionSource || (it.isAiEstimated ? "AI Vision" : "Thủ công"),
       isAiEstimated: Boolean(it.isAiEstimated),
-      confidence: it.confidence,
+      confidence: it.confidence ? Math.min(1, Math.max(0, Number(it.confidence))) : undefined,
     }));
 
     const newMeal: StoredMeal = {
@@ -395,43 +461,56 @@ export const repository = {
 
     const supabase = createClient();
     if (supabase) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-      if (user) {
-        newMeal.userId = user.id;
-        const { data: dbMeal } = await supabase
-          .from("meals")
-          .insert({
-            user_id: user.id,
-            eaten_at: input.eatenAt,
-            meal_type: input.mealType,
-            notes: input.notes,
-            analysis_status: input.analysisStatus,
-          })
-          .select()
-          .single();
+        if (user) {
+          newMeal.userId = user.id;
+          const { data: dbMeal, error: mealErr } = await supabase
+            .from("meals")
+            .insert({
+              user_id: user.id,
+              eaten_at: input.eatenAt,
+              meal_type: input.mealType,
+              notes: input.notes || null,
+              analysis_status: input.analysisStatus,
+            })
+            .select()
+            .single();
 
-        if (dbMeal) {
-          const itemsToInsert = input.items.map((it) => ({
-            meal_id: dbMeal.id,
-            food_id: it.foodId || null,
-            food_name_snapshot: it.foodName,
-            portion_g: it.portionG,
-            calories: it.nutrition.calories,
-            protein: it.nutrition.protein,
-            carbs: it.nutrition.carbs,
-            fat: it.nutrition.fat,
-            fiber: it.nutrition.fiber,
-            nutrition_source: it.nutritionSource || (it.isAiEstimated ? "AI Vision" : "Thủ công"),
-            is_ai_estimated: Boolean(it.isAiEstimated),
-            confidence: it.confidence || null,
-          }));
+          if (mealErr) {
+            console.error("Supabase insert meal error:", mealErr);
+          }
 
-          await supabase.from("meal_items").insert(itemsToInsert);
-          newMeal.id = dbMeal.id;
+          if (dbMeal) {
+            newMeal.id = dbMeal.id;
+
+            // Important: validate food_id is UUID before DB insert, otherwise Postgres throws error 22P02
+            const itemsToInsert = newItems.map((it) => ({
+              meal_id: dbMeal.id,
+              food_id: isValidUUID(it.foodId) ? it.foodId : null,
+              food_name_snapshot: it.foodNameSnapshot,
+              portion_g: it.portionG,
+              calories: it.calories,
+              protein: it.protein,
+              carbs: it.carbs,
+              fat: it.fat,
+              fiber: it.fiber,
+              nutrition_source: it.nutritionSource,
+              is_ai_estimated: it.isAiEstimated,
+              confidence: it.confidence || null,
+            }));
+
+            const { error: itemsErr } = await supabase.from("meal_items").insert(itemsToInsert);
+            if (itemsErr) {
+              console.error("Supabase insert meal_items error:", itemsErr);
+            }
+          }
         }
+      } catch (dbErr) {
+        console.error("Supabase meal transaction exception:", dbErr);
       }
     }
 

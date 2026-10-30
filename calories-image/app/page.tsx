@@ -12,6 +12,7 @@ import { MealLoggerModal } from "@/app/components/MealLoggerModal";
 import { AuthModal } from "@/app/components/AuthModal";
 import {
   repository,
+  getLocalDateString,
   type StoredProfile,
   type StoredGoal,
   type StoredMeal,
@@ -32,6 +33,7 @@ export default function Home() {
   const [profile, setProfile] = useState<StoredProfile | null>(null);
   const [goal, setGoal] = useState<StoredGoal | null>(null);
   const [todayMeals, setTodayMeals] = useState<StoredMeal[]>([]);
+  const [diaryMeals, setDiaryMeals] = useState<StoredMeal[]>([]);
   const [allMeals, setAllMeals] = useState<StoredMeal[]>([]);
   const [weightEntries, setWeightEntries] = useState<StoredWeightEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -44,7 +46,7 @@ export default function Home() {
 
   // Initialize selected date on client mount
   useEffect(() => {
-    setSelectedDate(new Date().toISOString().split("T")[0]);
+    setSelectedDate(getLocalDateString());
   }, []);
 
   // Listen to Supabase Auth state and session
@@ -83,21 +85,30 @@ export default function Home() {
   }, []);
 
   // Load data whenever selectedDate changes
-  const loadData = async (dateToLoad?: string) => {
+  const loadData = async (dateForDiary?: string) => {
     try {
       setIsLoading(true);
       const isSupabaseActive = isSupabaseConfigured();
       setIsDemoMode(!isSupabaseActive);
 
-      const targetDate =
-        dateToLoad || selectedDate || new Date().toISOString().split("T")[0];
+      const todayStr = getLocalDateString();
+      const targetDiaryDate = dateForDiary || selectedDate || todayStr;
 
       const { profile: p, goal: g } = await repository.getProfile();
       setProfile(p);
       setGoal(g);
 
-      const mealsToday = await repository.getMealsForDate(targetDate);
+      // ALWAYS load today's meals for Dashboard metrics & remaining calories
+      const mealsToday = await repository.getMealsForDate(todayStr);
       setTodayMeals(mealsToday);
+
+      // Load diary meals for the selected date
+      if (targetDiaryDate === todayStr) {
+        setDiaryMeals(mealsToday);
+      } else {
+        const mealsSelected = await repository.getMealsForDate(targetDiaryDate);
+        setDiaryMeals(mealsSelected);
+      }
 
       const all = await repository.getAllMeals();
       setAllMeals(all);
@@ -126,13 +137,15 @@ export default function Home() {
   // Handler: Save Meal
   const handleSaveMeal = async (mealData: any) => {
     await repository.saveMeal(mealData);
-    await loadData();
+    const todayStr = getLocalDateString();
+    setSelectedDate(todayStr);
+    await loadData(todayStr);
   };
 
   // Handler: Delete Meal
   const handleDeleteMeal = async (mealId: string) => {
     await repository.deleteMeal(mealId);
-    await loadData();
+    await loadData(selectedDate);
   };
 
   // Handler: Add Weight Entry
@@ -216,9 +229,9 @@ export default function Home() {
 
         {currentTab === "diary" && (
           <DiaryTab
-            meals={todayMeals}
+            meals={diaryMeals}
             goal={goal}
-            selectedDate={selectedDate}
+            selectedDate={selectedDate || getLocalDateString()}
             onDateChange={setSelectedDate}
             onOpenMealLog={handleOpenMealLog}
             onDeleteMeal={handleDeleteMeal}
