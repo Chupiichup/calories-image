@@ -145,7 +145,9 @@ export function ProfileTab({
         {
           currentWeightKg: Number(currentWeight),
           goalWeightKg: Number(goalWeight),
-          dailyCalorieTarget: calculated.calorieTarget,
+          dailyCalorieTarget: calculated.isBelowSafetyFloor
+            ? calculated.safeCalorieTarget
+            : calculated.calorieTarget,
           dailyProteinTargetG: calculated.macros.protein,
           dailyCarbTargetG: calculated.macros.carbs,
           dailyFatTargetG: calculated.macros.fat,
@@ -450,7 +452,7 @@ export function ProfileTab({
                           : "bg-white text-stone-700 border-stone-200 hover:bg-stone-50"
                       }`}
                     >
-                      ⚡ Tối thiểu an toàn ({calculated.timeline.minSafeWeeks} tuần)
+                      ⚡ Nhanh an toàn ({calculated.timeline.minSafeWeeks} tuần - {calculated.safeCalorieTarget} kcal)
                     </button>
                     {calculated.timeline.minSafeWeeks <= 26 && (
                       <button
@@ -491,17 +493,32 @@ export function ProfileTab({
                         1 năm (52 tuần)
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setCustomWeeks(calculated.timeline.idealWeeks)}
-                      className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold border transition ${
-                        customWeeks === calculated.timeline.idealWeeks
-                          ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                          : "bg-white text-stone-700 border-stone-200 hover:bg-stone-50"
-                      }`}
-                    >
-                      🌿 Chuẩn bền vững ({calculated.timeline.idealWeeks} tuần)
-                    </button>
+                    {calculated.timeline.idealWeeks > calculated.timeline.minSafeWeeks && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomWeeks(calculated.timeline.idealWeeks)}
+                        className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold border transition ${
+                          customWeeks === calculated.timeline.idealWeeks
+                            ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                            : "bg-white text-stone-700 border-stone-200 hover:bg-stone-50"
+                        }`}
+                      >
+                        🌿 Thoải mái ({calculated.timeline.idealWeeks} tuần)
+                      </button>
+                    )}
+                    {calculated.timeline.gentleWeeks > calculated.timeline.idealWeeks && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomWeeks(calculated.timeline.gentleWeeks)}
+                        className={`rounded-xl px-2.5 py-1.5 text-xs font-semibold border transition ${
+                          customWeeks === calculated.timeline.gentleWeeks
+                            ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                            : "bg-white text-stone-700 border-stone-200 hover:bg-stone-50"
+                        }`}
+                      >
+                        🍃 Rất nhẹ nhàng ({calculated.timeline.gentleWeeks} tuần)
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -524,13 +541,28 @@ export function ProfileTab({
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                     <div>
                       <span className="text-stone-500 block text-[11px]">Calo nạp mỗi ngày:</span>
-                      <span className="font-extrabold text-emerald-700 text-sm">
-                        {calculated.calorieTarget} kcal
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          className={`font-extrabold text-base ${
+                            calculated.isBelowSafetyFloor ? "text-rose-600" : "text-emerald-700"
+                          }`}
+                        >
+                          {calculated.calorieTarget} kcal
+                        </span>
+                        {calculated.isBelowSafetyFloor && (
+                          <span className="inline-flex items-center rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
+                            Dưới sàn {calculated.absoluteSafetyFloor}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <span className="text-stone-500 block text-[11px]">Thâm hụt mỗi ngày:</span>
-                      <span className="font-extrabold text-stone-800 text-sm">
+                      <span
+                        className={`font-extrabold text-sm ${
+                          calculated.isBelowSafetyFloor ? "text-rose-700" : "text-stone-800"
+                        }`}
+                      >
                         {calculated.deficitKcal} kcal ({calculated.deficitPercent}%)
                       </span>
                     </div>
@@ -553,7 +585,7 @@ export function ProfileTab({
                 {/* Safety evaluation box */}
                 <div
                   className={`rounded-xl p-3 text-xs leading-relaxed border ${
-                    calculated.timeline.safetyStatus === "dangerous_low_calorie"
+                    calculated.isBelowSafetyFloor
                       ? "bg-rose-50 border-rose-200 text-rose-800"
                       : calculated.timeline.safetyStatus === "aggressive_warning"
                       ? "bg-amber-50 border-amber-200 text-amber-800"
@@ -561,15 +593,20 @@ export function ProfileTab({
                   }`}
                 >
                   <p>{calculated.timeline.safetyMessage}</p>
-                  {calculated.timeline.safetyStatus === "dangerous_low_calorie" && (
-                    <button
-                      type="button"
-                      onClick={() => setCustomWeeks(calculated.timeline.minSafeWeeks)}
-                      className="mt-2 inline-flex items-center gap-1 rounded-lg bg-rose-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-800 transition"
-                    >
-                      <span>Áp dụng thời gian an toàn tối ưu ({calculated.timeline.minSafeWeeks} tuần)</span>
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </button>
+                  {calculated.isBelowSafetyFloor && (
+                    <div className="mt-2.5 pt-2 border-t border-rose-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <span className="text-[11px] text-rose-700 font-medium">
+                        Khuyến nghị: Tăng lên tối thiểu <strong>{calculated.timeline.minSafeWeeks} tuần</strong> để nạp an toàn <strong>{calculated.safeCalorieTarget} kcal/ngày</strong>.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCustomWeeks(calculated.timeline.minSafeWeeks)}
+                        className="inline-flex items-center justify-center gap-1 rounded-lg bg-rose-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-800 transition shrink-0"
+                      >
+                        <span>Áp dụng mốc an toàn ({calculated.timeline.minSafeWeeks} tuần)</span>
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -673,9 +710,20 @@ export function ProfileTab({
               </div>
               <div className="pt-2 flex justify-between text-sm">
                 <span className="font-bold text-emerald-900">Mục tiêu nạp mỗi ngày:</span>
-                <span className="font-black text-emerald-700 text-lg">
-                  {calculated.calorieTarget} kcal
-                </span>
+                <div className="text-right">
+                  <span
+                    className={`font-black text-lg ${
+                      calculated.isBelowSafetyFloor ? "text-rose-700" : "text-emerald-700"
+                    }`}
+                  >
+                    {calculated.calorieTarget} kcal
+                  </span>
+                  {calculated.isBelowSafetyFloor && (
+                    <span className="block text-[10px] text-rose-600 font-semibold">
+                      (Khi lưu sẽ giữ sàn an toàn {calculated.safeCalorieTarget} kcal)
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 

@@ -55,6 +55,10 @@ export type WeightLossTimeline = {
   minSafeWeeks: number;
   minSafeCalorieFloor: number;
   idealWeeks: number;
+  sustainableWeeks: number;
+  gentleWeeks: number;
+  rawCalorieNeeded?: number;
+  rawDeficitNeededKcal?: number;
 };
 
 export type TargetCalculationOptions = {
@@ -68,7 +72,11 @@ export type TargetCalculationResult = {
   bmiCategory: string;
   bmr: number;
   tdee: number;
+  rawCalorieTarget: number;
   calorieTarget: number;
+  safeCalorieTarget: number;
+  isBelowSafetyFloor: boolean;
+  absoluteSafetyFloor: number;
   deficitKcal: number;
   deficitPercent: number;
   macros: {
@@ -223,8 +231,16 @@ export function calculateWeightLossTimeline(params: {
   const minSafeWeeks = maxSafeDailyDeficit > 0 && totalDeficitNeededKcal > 0
     ? Math.ceil(totalDeficitNeededKcal / (maxSafeDailyDeficit * 7))
     : 1;
+
+  // Sustainable weeks (moderate deficit ~380 kcal/day or ~20-25% longer than minSafeWeeks)
+  const moderateDailyDeficit = Math.min(maxSafeDailyDeficit, 380);
   const idealWeeks = totalDeficitNeededKcal > 0
-    ? Math.ceil(totalDeficitNeededKcal / (Math.min(maxSafeDailyDeficit, 550) * 7))
+    ? Math.max(minSafeWeeks + (minSafeWeeks >= 40 ? 11 : 4), Math.ceil(totalDeficitNeededKcal / (moderateDailyDeficit * 7)))
+    : 1;
+
+  // Gentle weeks (comfortable deficit ~250 kcal/day)
+  const gentleWeeks = totalDeficitNeededKcal > 0
+    ? Math.max(idealWeeks + (minSafeWeeks >= 40 ? 20 : 6), Math.ceil(totalDeficitNeededKcal / (250 * 7)))
     : 1;
 
   let targetWeeks = 0;
@@ -239,7 +255,8 @@ export function calculateWeightLossTimeline(params: {
     targetWeeks = Math.max(1, Math.round(params.desiredWeeks));
     targetDays = targetWeeks * 7;
     weeklyWeightChangeKg = round(weightToLoseKg / targetWeeks, 2);
-  } else if (dailyDeficit > 0) {
+  } else if (params.calorieTarget < params.tdee) {
+    const dailyDeficit = params.tdee - params.calorieTarget;
     targetDays = Math.ceil(totalDeficitNeededKcal / dailyDeficit);
     targetWeeks = Math.max(1, Math.round(targetDays / 7));
     weeklyWeightChangeKg = round((dailyDeficit * 7) / 7700, 2);
@@ -270,12 +287,11 @@ export function calculateWeightLossTimeline(params: {
     safetyStatus = current === goal ? "maintenance" : "surplus";
     safetyMessage = current === goal ? "Mục tiêu duy trì cân nặng ổn định." : "Mục tiêu tăng cân / phát triển cơ bắp.";
   } else if (
-    params.calorieTarget < minSafeCalorieFloor ||
     theoreticalCalorie < minSafeCalorieFloor ||
     weeklyWeightChangeKg > 1.5
   ) {
     safetyStatus = "dangerous_low_calorie";
-    safetyMessage = `⚠️ Nguy hiểm: Thời gian ${targetWeeks} tuần đòi hỏi thâm hụt quá lớn (${theoreticalDailyDeficit} kcal/ngày), khiến calo nạp thực tế tụt xuống dưới sàn an toàn y khoa (${minSafeCalorieFloor} kcal/ngày). Tốc độ này (${weeklyWeightChangeKg} kg/tuần) dễ gây kiệt sức, mất cơ và suy giảm trao đổi chất. Hãy tăng thời gian lên tối thiểu ${minSafeWeeks} tuần.`;
+    safetyMessage = `⚠️ Nguy hiểm: Thời gian ${targetWeeks} tuần đòi hỏi thâm hụt ${theoreticalDailyDeficit} kcal/ngày, khiến calo nạp theo toán học chỉ còn ${theoreticalCalorie} kcal/ngày (thấp hơn sàn an toàn y khoa ${minSafeCalorieFloor} kcal/ngày). Tốc độ này (${weeklyWeightChangeKg} kg/tuần) dễ gây suy giáp, mất cơ và mệt mỏi. Khuyến nghị giãn thời gian lên tối thiểu ${minSafeWeeks} tuần để nạp an toàn.`;
   } else if (weeklyWeightChangeKg > 1.0) {
     safetyStatus = "aggressive_warning";
     safetyMessage = `⚠️ Tốc độ giảm ${weeklyWeightChangeKg} kg/tuần khá nhanh (vượt 1kg/tuần). Cần đảm bảo nạp đủ đạm tối thiểu 2g/kg và bổ sung đủ vi chất.`;
@@ -301,6 +317,10 @@ export function calculateWeightLossTimeline(params: {
     minSafeWeeks,
     minSafeCalorieFloor,
     idealWeeks,
+    sustainableWeeks: idealWeeks,
+    gentleWeeks,
+    rawCalorieNeeded: theoreticalCalorie,
+    rawDeficitNeededKcal: theoreticalDailyDeficit,
   };
 }
 
@@ -339,15 +359,19 @@ export function calculateComprehensiveTargets(
 
   // Determine raw calorie target based on mode
   let rawCalorieTarget: number;
+  let rawDeficitKcal = 0;
+
   if (typeof options.targetWeeks === "number" && options.targetWeeks > 0 && weightToLose > 0) {
     const targetDays = Math.max(7, options.targetWeeks * 7);
-    const dailyDeficitNeeded = Math.round(totalDeficitNeeded / targetDays);
-    rawCalorieTarget = tdee - dailyDeficitNeeded;
+    rawDeficitKcal = Math.round(totalDeficitNeeded / targetDays);
+    rawCalorieTarget = Math.round(tdee - rawDeficitKcal);
   } else if (typeof options.customCalorieTarget === "number" && options.customCalorieTarget > 0) {
-    rawCalorieTarget = options.customCalorieTarget;
+    rawCalorieTarget = Math.round(options.customCalorieTarget);
+    rawDeficitKcal = Math.max(0, tdee - rawCalorieTarget);
   } else {
     const deficitRate = pace === "slow" ? 0.15 : pace === "moderate" ? 0.20 : 0.25;
-    rawCalorieTarget = tdee * (1 - deficitRate);
+    rawDeficitKcal = Math.round(tdee * deficitRate);
+    rawCalorieTarget = Math.round(tdee - rawDeficitKcal);
   }
 
   // Safety floor: Protect against starvation response & metabolic slowdown
@@ -358,42 +382,46 @@ export function calculateComprehensiveTargets(
   const weightFloor = Math.min(22 * targetWeightRef, Math.round(tdee * 0.8));
   const absoluteSafetyFloor = Math.max(sexFloor, Math.round(weightFloor));
 
-  if (rawCalorieTarget < absoluteSafetyFloor && weightToLose > 0) {
+  const isBelowSafetyFloor = rawCalorieTarget < absoluteSafetyFloor && weightToLose > 0;
+
+  if (isBelowSafetyFloor) {
     warnings.push(
-      `Mục tiêu thời gian bạn chọn đòi hỏi mức thâm hụt quá lớn, khiến calo nạp (${Math.round(rawCalorieTarget)} kcal) thấp hơn sàn an toàn y học (${absoluteSafetyFloor} kcal/ngày). Ứng dụng đã tự động giữ calo ở mức an toàn tối thiểu ${absoluteSafetyFloor} kcal để bảo vệ sức khỏe.`,
+      `Mục tiêu thời gian bạn chọn đòi hỏi mức thâm hụt quá lớn, khiến calo nạp (${rawCalorieTarget} kcal) thấp hơn sàn an toàn y học (${absoluteSafetyFloor} kcal/ngày). Ứng dụng khuyến nghị giãn thời gian tối thiểu hoặc hệ thống sẽ tự động giữ calo ở mức an toàn tối thiểu ${absoluteSafetyFloor} kcal khi lưu để bảo vệ sức khỏe.`,
     );
   }
 
-  let finalCalorieTarget = Math.round(Math.max(rawCalorieTarget, absoluteSafetyFloor));
+  const safeCalorieTarget = Math.round(
+    Math.min(tdee, Math.max(rawCalorieTarget, absoluteSafetyFloor))
+  );
 
-  if (finalCalorieTarget > tdee && tdee > absoluteSafetyFloor) {
-    finalCalorieTarget = tdee;
-  }
+  // In duration mode (when options.targetWeeks is specified), calorieTarget returns rawCalorieTarget
+  // so the slider dynamically and faithfully reflects the exact math (e.g. 994 kcal at 48 weeks vs 1204 kcal at 69 weeks).
+  // safeCalorieTarget provides the clamped safe minimum (1200 kcal) for saving to database and safety badges.
+  // In pace/default mode, calorieTarget uses safeCalorieTarget.
+  const displayCalorieTarget = options.targetWeeks ? rawCalorieTarget : safeCalorieTarget;
 
-  const actualDeficitKcal = Math.max(0, Math.round(tdee - finalCalorieTarget));
+  const actualDeficitKcal = Math.max(0, Math.round(tdee - displayCalorieTarget));
   const actualDeficitPercent = tdee > 0 ? round((actualDeficitKcal / tdee) * 100, 1) : 0;
 
   // Muscle-preserving macronutrient calculation:
-  // 1. Protein: 1.8g - 2.0g per kg body weight (crucial to spare lean body mass during calorie deficit)
-  // 2. Fat: 0.8g - 1.0g per kg body weight (essential for hormonal balance and fat-soluble vitamins)
-  // 3. Carbs: remaining calories / 4
-  // 4. Fiber: min 25g (women) / 30g (men), or ~14g per 1000 kcal
+  // Base macros on safeCalorieTarget (or displayCalorieTarget if higher) to ensure adequate protein & nutrition
+  const macroBaseCalorie = Math.max(displayCalorieTarget, absoluteSafetyFloor);
   const proteinG = Math.round(Math.max(input.weightKg * 2.0, 75));
   const fatG = Math.round(Math.max(input.weightKg * 0.8, 45));
 
   const caloriesFromProtein = proteinG * 4;
   const caloriesFromFat = fatG * 9;
-  const remainingCalories = Math.max(finalCalorieTarget - (caloriesFromProtein + caloriesFromFat), 0);
+  const remainingCalories = Math.max(macroBaseCalorie - (caloriesFromProtein + caloriesFromFat), 0);
   const carbsG = Math.round(remainingCalories / 4);
 
-  const fiberG = Math.round(Math.max(25, (finalCalorieTarget / 1000) * 14));
+  const fiberG = Math.round(Math.max(25, (macroBaseCalorie / 1000) * 14));
 
   // Compute timeline
   const timeline = calculateWeightLossTimeline({
     currentWeightKg: input.weightKg,
     goalWeightKg: input.goalWeightKg,
     tdee,
-    calorieTarget: finalCalorieTarget,
+    calorieTarget: displayCalorieTarget,
     sex: input.sex,
     desiredWeeks: options.targetWeeks,
   });
@@ -405,7 +433,11 @@ export function calculateComprehensiveTargets(
     bmiCategory,
     bmr,
     tdee,
-    calorieTarget: finalCalorieTarget,
+    rawCalorieTarget,
+    calorieTarget: displayCalorieTarget,
+    safeCalorieTarget,
+    isBelowSafetyFloor,
+    absoluteSafetyFloor,
     deficitKcal: actualDeficitKcal,
     deficitPercent: actualDeficitPercent,
     macros: {

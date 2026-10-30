@@ -319,7 +319,7 @@ describe("nutrition calculations engine", () => {
       expect(gentleResult.timeline.targetWeeks).toBe(40);
     });
 
-    it("clamps to safety floor and generates medical warning if user enters dangerously short duration", () => {
+    it("flags safety floor and generates medical warning if user enters dangerously short duration", () => {
       const input = {
         weightKg: 75,
         heightCm: 158,
@@ -331,10 +331,40 @@ describe("nutrition calculations engine", () => {
 
       // Extreme/dangerous request: 30kg in 10 weeks (would require 3300 kcal/day deficit!)
       const extremeResult = calculateComprehensiveTargets(input, { targetWeeks: 10 });
-      // Safety floor MUST protect the user: clamp at >= 1200 kcal
-      expect(extremeResult.calorieTarget).toBeGreaterThanOrEqual(1200);
+      // Safety floor MUST protect the user: safeCalorieTarget clamps at >= 1200 kcal
+      expect(extremeResult.safeCalorieTarget).toBe(1200);
+      expect(extremeResult.isBelowSafetyFloor).toBe(true);
+      expect(extremeResult.rawCalorieTarget).toBeLessThan(1200);
       expect(extremeResult.warnings.some((w) => w.includes("sàn an toàn y học"))).toBe(true);
       expect(extremeResult.timeline.safetyStatus).toBe("dangerous_low_calorie");
+    });
+
+    it("faithfully computes unconstrained calories for 48 weeks (994 kcal) vs 69 weeks (1204 kcal)", () => {
+      const input = {
+        weightKg: 75,
+        heightCm: 158,
+        ageYears: 35,
+        sex: "female" as const,
+        activityLevel: "sedentary" as const, // TDEE: 1682 kcal
+        goalWeightKg: 45, // 30kg loss -> 231,000 kcal total deficit
+      };
+
+      // 48 weeks (336 days): needed deficit = 231,000 / 336 = 687.5 kcal/day -> raw = 1682 - 688 = 994 kcal
+      const result48 = calculateComprehensiveTargets(input, { targetWeeks: 48 });
+      expect(result48.rawCalorieTarget).toBe(994);
+      expect(result48.calorieTarget).toBe(994);
+      expect(result48.safeCalorieTarget).toBe(1200);
+      expect(result48.isBelowSafetyFloor).toBe(true);
+      expect(result48.timeline.safetyStatus).toBe("dangerous_low_calorie");
+
+      // 69 weeks (483 days): needed deficit = 231,000 / 483 = 478.3 kcal/day -> raw = 1682 - 478 = 1204 kcal
+      const result69 = calculateComprehensiveTargets(input, { targetWeeks: 69 });
+      expect(result69.rawCalorieTarget).toBe(1204);
+      expect(result69.calorieTarget).toBe(1204);
+      expect(result69.safeCalorieTarget).toBe(1204);
+      expect(result69.isBelowSafetyFloor).toBe(false);
+      expect(result69.timeline.safetyStatus).toBe("safe");
+      expect(result69.timeline.idealWeeks).toBeGreaterThan(69); // Presets are distinct
     });
   });
 });
