@@ -72,172 +72,32 @@ export type StoredWeightEntry = {
 };
 
 const DEFAULT_PROFILE: StoredProfile = {
-  id: "demo-user-1",
-  email: "demo@caloriesimage.local",
-  ageYears: 29,
-  heightCm: 172,
+  id: "user-default",
+  email: "",
+  ageYears: 25,
+  heightCm: 170,
   sexForBmr: "male",
   activityLevel: "moderate",
   updatedAt: new Date().toISOString(),
 };
 
 const DEFAULT_GOAL: StoredGoal = {
-  id: "demo-goal-1",
-  userId: "demo-user-1",
-  currentWeightKg: 76.5,
-  goalWeightKg: 70.0,
-  dailyCalorieTarget: 2150,
-  dailyProteinTargetG: 150,
-  dailyCarbTargetG: 230,
-  dailyFatTargetG: 65,
-  dailyFiberTargetG: 30,
+  id: "goal-default",
+  userId: "user-default",
+  currentWeightKg: 70.0,
+  goalWeightKg: 65.0,
+  dailyCalorieTarget: 2000,
+  dailyProteinTargetG: 140,
+  dailyCarbTargetG: 210,
+  dailyFatTargetG: 60,
+  dailyFiberTargetG: 28,
   weightLossPace: "moderate",
   updatedAt: new Date().toISOString(),
 };
 
-const DEFAULT_WEIGHT_ENTRIES: StoredWeightEntry[] = [
-  {
-    id: "w-1",
-    userId: "demo-user-1",
-    recordedAt: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString(),
-    weightKg: 78.2,
-    notes: "Bắt đầu đo định kỳ",
-  },
-  {
-    id: "w-2",
-    userId: "demo-user-1",
-    recordedAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-    weightKg: 77.6,
-    notes: "Sau tuần đầu tiên ăn chuẩn đạm",
-  },
-  {
-    id: "w-3",
-    userId: "demo-user-1",
-    recordedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    weightKg: 77.0,
-    notes: "Tập gym đều đặn 4 buổi",
-  },
-  {
-    id: "w-4",
-    userId: "demo-user-1",
-    recordedAt: new Date().toISOString(),
-    weightKg: 76.5,
-    notes: "Cảm thấy cơ thể nhẹ nhàng, bụng gọn hơn",
-  },
-];
+const DEFAULT_WEIGHT_ENTRIES: StoredWeightEntry[] = [];
 
-const DEFAULT_MEALS: StoredMeal[] = [
-  {
-    id: "meal-1",
-    userId: "demo-user-1",
-    eatenAt: new Date(new Date().setHours(7, 30, 0, 0)).toISOString(),
-    mealType: "breakfast",
-    notes: "Bữa sáng giàu đạm khởi đầu ngày mới",
-    analysisStatus: "manual",
-    createdAt: new Date().toISOString(),
-    items: [
-      {
-        id: "mi-1",
-        mealId: "meal-1",
-        foodId: "food-dish-pho-bo",
-        foodNameSnapshot: "Phở bò tái chín",
-        portionG: 500,
-        calories: 425,
-        protein: 25.0,
-        carbs: 55.0,
-        fat: 11.0,
-        fiber: 2.0,
-        nutritionSource: "Viện Dinh dưỡng Quốc gia",
-        isAiEstimated: false,
-      },
-      {
-        id: "mi-2",
-        mealId: "meal-1",
-        foodId: "food-trung-ga",
-        foodNameSnapshot: "Trứng gà luộc thêm",
-        portionG: 55,
-        calories: 78.6,
-        protein: 6.9,
-        carbs: 0.4,
-        fat: 5.2,
-        fiber: 0.0,
-        nutritionSource: "Viện Dinh dưỡng Quốc gia",
-        isAiEstimated: false,
-      },
-    ],
-  },
-  {
-    id: "meal-2",
-    userId: "demo-user-1",
-    eatenAt: new Date(new Date().setHours(12, 15, 0, 0)).toISOString(),
-    mealType: "lunch",
-    notes: "Bữa trưa công sở chụp ảnh nhận diện bằng AI",
-    analysisStatus: "ai_confirmed",
-    createdAt: new Date().toISOString(),
-    items: [
-      {
-        id: "mi-3",
-        mealId: "meal-2",
-        foodId: "food-rice-white",
-        foodNameSnapshot: "Cơm trắng (nấu chín)",
-        portionG: 180,
-        calories: 234,
-        protein: 4.9,
-        carbs: 50.8,
-        fat: 0.5,
-        fiber: 0.7,
-        nutritionSource: "Viện Dinh dưỡng Quốc gia",
-        isAiEstimated: true,
-        confidence: 0.95,
-      },
-      {
-        id: "mi-4",
-        mealId: "meal-2",
-        foodId: "food-uc-ga",
-        foodNameSnapshot: "Ức gà áp chảo không da",
-        portionG: 150,
-        calories: 247.5,
-        protein: 46.5,
-        carbs: 0.0,
-        fat: 5.4,
-        fiber: 0.0,
-        nutritionSource: "USDA FoodData Central",
-        isAiEstimated: true,
-        confidence: 0.91,
-      },
-      {
-        id: "mi-5",
-        mealId: "meal-2",
-        foodId: "food-rau-muong",
-        foodNameSnapshot: "Rau muống luộc",
-        portionG: 150,
-        calories: 34.5,
-        protein: 3.9,
-        carbs: 4.7,
-        fat: 0.5,
-        fiber: 1.5,
-        nutritionSource: "Viện Dinh dưỡng Quốc gia",
-        isAiEstimated: true,
-        confidence: 0.88,
-      },
-      {
-        id: "mi-6",
-        mealId: "meal-2",
-        foodId: "food-dau-an",
-        foodNameSnapshot: "Dầu mỡ chế biến ước tính",
-        portionG: 7,
-        calories: 61.9,
-        protein: 0.0,
-        carbs: 0.0,
-        fat: 7.0,
-        fiber: 0.0,
-        nutritionSource: "AI Assumption",
-        isAiEstimated: true,
-        confidence: 0.7,
-      },
-    ],
-  },
-];
+const DEFAULT_MEALS: StoredMeal[] = [];
 
 // Helper to check if running in browser
 const isBrowser = typeof window !== "undefined";
@@ -432,7 +292,11 @@ export const repository = {
     }
 
     const allMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
-    return allMeals.filter((m) => m.eatenAt.startsWith(dateString));
+    const cleaned = allMeals.filter((m) => m.id !== "meal-1" && m.id !== "meal-2");
+    if (cleaned.length !== allMeals.length) {
+      setStorage("meals", cleaned);
+    }
+    return cleaned.filter((m) => m.eatenAt.startsWith(dateString));
   },
 
   async getAllMeals(): Promise<StoredMeal[]> {
@@ -478,7 +342,12 @@ export const repository = {
       }
     }
 
-    return getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
+    const allMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
+    const cleaned = allMeals.filter((m) => m.id !== "meal-1" && m.id !== "meal-2");
+    if (cleaned.length !== allMeals.length) {
+      setStorage("meals", cleaned);
+    }
+    return cleaned;
   },
 
   async saveMeal(input: {
@@ -612,7 +481,12 @@ export const repository = {
       }
     }
 
-    return getStorage<StoredWeightEntry[]>("weight_entries", DEFAULT_WEIGHT_ENTRIES);
+    const allWeights = getStorage<StoredWeightEntry[]>("weight_entries", DEFAULT_WEIGHT_ENTRIES);
+    const cleaned = allWeights.filter((w) => !["w-1", "w-2", "w-3", "w-4"].includes(w.id));
+    if (cleaned.length !== allWeights.length) {
+      setStorage("weight_entries", cleaned);
+    }
+    return cleaned;
   },
 
   async addWeightEntry(entry: {
@@ -709,6 +583,18 @@ export const repository = {
       return { success: true, message: "Khôi phục dữ liệu thành công!" };
     } catch (e: any) {
       return { success: false, message: `Lỗi đọc tệp: ${e.message}` };
+    }
+  },
+
+  resetAllData(): void {
+    if (!isBrowser) return;
+    try {
+      localStorage.removeItem("calories_image_meals");
+      localStorage.removeItem("calories_image_weight_entries");
+      localStorage.removeItem("calories_image_profile");
+      localStorage.removeItem("calories_image_goal");
+    } catch (e) {
+      console.error("Reset error:", e);
     }
   },
 };

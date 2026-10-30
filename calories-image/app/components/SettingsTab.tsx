@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Database,
+  Trash2,
 } from "lucide-react";
 import { repository } from "@/lib/db/repository";
 
@@ -191,6 +192,23 @@ export function SettingsTab() {
             <span>Khôi phục từ tệp JSON</span>
             <input type="file" accept=".json" onChange={handleImportFile} className="hidden" />
           </label>
+
+          <button
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Bạn có chắc chắn muốn xóa toàn bộ dữ liệu bữa ăn và số liệu mẫu để bắt đầu lại từ số 0?",
+                )
+              ) {
+                repository.resetAllData();
+                window.location.reload();
+              }
+            }}
+            className="flex items-center gap-2 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-xs font-bold text-rose-800 hover:bg-rose-100 transition"
+          >
+            <Trash2 className="h-4 w-4" />
+            <span>Xóa sạch dữ liệu (Bắt đầu từ số 0)</span>
+          </button>
         </div>
       </div>
     </div>
