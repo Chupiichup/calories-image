@@ -126,12 +126,17 @@ export function HistoryTab({ meals, goal }: HistoryTabProps) {
                   return (
                     <tr key={d.date} className="hover:bg-stone-50 transition">
                       <td className="py-3 font-medium text-stone-800">
-                        {new Date(`${d.date}T00:00:00`).toLocaleDateString("vi-VN", {
-                          weekday: "short",
-                          day: "2-digit",
-                          month: "2-digit",
-                          year: "numeric",
-                        })}
+                        {(() => {
+                          const [y, m, day] = d.date.split("-").map(Number);
+                          const dateObj = new Date(y, m - 1, day, 12, 0, 0);
+                          return dateObj.toLocaleDateString("vi-VN", {
+                            timeZone: "Asia/Ho_Chi_Minh",
+                            weekday: "short",
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                          });
+                        })()}
                       </td>
                       <td className="py-3 font-bold text-stone-900">{round(d.calories, 0)} kcal</td>
                       <td className="py-3 font-semibold text-emerald-700">{round(d.protein, 0)}g</td>

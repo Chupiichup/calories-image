@@ -3,6 +3,8 @@ import {
   repository,
   isValidUUID,
   getLocalDateString,
+  formatToVietnamDateTimeLocal,
+  vietnamDateTimeLocalToIso,
   deduplicateMealList,
   type StoredMeal,
 } from "./repository";
@@ -17,9 +19,61 @@ describe("Database Repository & Calorie Tracking", () => {
     expect(isValidUUID(null)).toBe(false);
   });
 
-  it("formats local dates accurately for device timezones", () => {
-    const d = new Date(2026, 9, 30, 23, 30, 0); // October 30, 2026
-    expect(getLocalDateString(d)).toBe("2026-10-30");
+  it("formats local dates accurately strictly in Vietnam timezone (Asia/Ho_Chi_Minh)", () => {
+    // 17:15 UTC on Oct 30 is 00:15 on Oct 31 in Vietnam (UTC+7)
+    const d1 = new Date("2026-10-30T17:15:00Z");
+    expect(getLocalDateString(d1)).toBe("2026-10-31");
+    expect(formatToVietnamDateTimeLocal(d1)).toBe("2026-10-31T00:15");
+
+    // 10:00 UTC on Oct 30 is 17:00 on Oct 30 in Vietnam (UTC+7)
+    const d2 = new Date("2026-10-30T10:00:00Z");
+    expect(getLocalDateString(d2)).toBe("2026-10-30");
+    expect(formatToVietnamDateTimeLocal(d2)).toBe("2026-10-30T17:00");
+
+    // Vietnam local datetime conversion to ISO
+    const iso = vietnamDateTimeLocalToIso("2026-10-30T19:30");
+    expect(iso).toBe("2026-10-30T12:30:00.000Z");
+  });
+
+  it("updates meal date, time, and mealType, moving meals between days accurately", async () => {
+    // Save a meal on Oct 31 initially
+    const saved = await repository.saveMeal({
+      mealType: "dinner",
+      eatenAt: "2026-10-30T17:15:00.000Z", // 00:15 on 2026-10-31 Vietnam time
+      notes: "Ăn đêm",
+      analysisStatus: "manual",
+      items: [
+        {
+          foodName: "Cháo gà",
+          portionG: 250,
+          nutrition: { calories: 300, protein: 20, carbs: 40, fat: 5, fiber: 1 },
+        },
+      ],
+    });
+
+    expect(saved.id).toBeDefined();
+
+    // Verify it initially shows up on Oct 31 in Vietnam
+    let oct31Meals = await repository.getMealsForDate("2026-10-31");
+    expect(oct31Meals.some((m) => m.id === saved.id)).toBe(true);
+
+    // Now update meal time to 20:00 on Oct 30 (user intended dinner on Oct 30)
+    const newEatenAtIso = vietnamDateTimeLocalToIso("2026-10-30T20:00");
+    const updated = await repository.updateMeal(saved.id, {
+      eatenAt: newEatenAtIso,
+      mealType: "dinner",
+      notes: "Bữa tối đã dời về ngày 30",
+    });
+
+    expect(updated).toBeDefined();
+    expect(updated?.eatenAt).toBe(newEatenAtIso);
+
+    // Verify it is no longer on Oct 31, but now on Oct 30!
+    oct31Meals = await repository.getMealsForDate("2026-10-31");
+    expect(oct31Meals.some((m) => m.id === saved.id)).toBe(false);
+
+    const oct30Meals = await repository.getMealsForDate("2026-10-30");
+    expect(oct30Meals.some((m) => m.id === saved.id)).toBe(true);
   });
 
   it("saves AI meal with non-UUID foodId and calculates consumed calories and remaining deficit correctly", async () => {

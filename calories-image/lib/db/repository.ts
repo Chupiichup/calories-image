@@ -105,16 +105,75 @@ export function isValidUUID(val?: string | null): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 }
 
-// Helper to get local YYYY-MM-DD date string according to device timezone
+// Helper to get local YYYY-MM-DD date string strictly according to Vietnam timezone (Asia/Ho_Chi_Minh, UTC+7)
 export function getLocalDateString(dateInput: Date | string = new Date()): string {
   const d = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
   if (isNaN(d.getTime())) {
     return new Date().toISOString().split("T")[0];
   }
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    return formatter.format(d);
+  } catch {
+    // Fallback if Intl timeZone is not supported
+    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+    const vnDate = new Date(utc + 3600000 * 7);
+    const year = vnDate.getFullYear();
+    const month = String(vnDate.getMonth() + 1).padStart(2, "0");
+    const day = String(vnDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+}
+
+// Formats a Date into YYYY-MM-DDTHH:mm string in Vietnam Time (for datetime-local input)
+export function formatToVietnamDateTimeLocal(dateInput: Date | string = new Date()): string {
+  const d = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
+  if (isNaN(d.getTime())) {
+    return formatToVietnamDateTimeLocal(new Date());
+  }
+  try {
+    const fmt = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const p = Object.fromEntries(fmt.formatToParts(d).map((x) => [x.type, x.value]));
+    let hour = p.hour;
+    if (hour === "24") hour = "00";
+    return `${p.year}-${p.month}-${p.day}T${hour}:${p.minute}`;
+  } catch {
+    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+    const vn = new Date(utc + 3600000 * 7);
+    const year = vn.getFullYear();
+    const month = String(vn.getMonth() + 1).padStart(2, "0");
+    const day = String(vn.getDate()).padStart(2, "0");
+    const hour = String(vn.getHours()).padStart(2, "0");
+    const minute = String(vn.getMinutes()).padStart(2, "0");
+    return `${year}-${month}-${day}T${hour}:${minute}`;
+  }
+}
+
+// Converts a Vietnam local datetime string (YYYY-MM-DDTHH:mm) into a standard ISO timestamp
+export function vietnamDateTimeLocalToIso(vnDateTimeStr: string): string {
+  if (!vnDateTimeStr) return new Date().toISOString();
+  if (vnDateTimeStr.includes("Z") || vnDateTimeStr.includes("+")) {
+    return new Date(vnDateTimeStr).toISOString();
+  }
+  const withSeconds = vnDateTimeStr.length === 16 ? `${vnDateTimeStr}:00` : vnDateTimeStr;
+  const parsed = new Date(`${withSeconds}+07:00`);
+  if (isNaN(parsed.getTime())) {
+    return new Date().toISOString();
+  }
+  return parsed.toISOString();
 }
 
 // Helper to check if running in browser
@@ -609,6 +668,46 @@ export const repository = {
       "meals",
       currentMeals.filter((m) => m.id !== mealId),
     );
+  },
+
+  async updateMeal(
+    mealId: string,
+    updates: {
+      eatenAt?: string;
+      mealType?: "breakfast" | "lunch" | "dinner" | "snack";
+      notes?: string;
+    },
+  ): Promise<StoredMeal | null> {
+    const supabase = createClient();
+    if (supabase) {
+      try {
+        const dbPayload: any = {};
+        if (updates.eatenAt) dbPayload.eaten_at = updates.eatenAt;
+        if (updates.mealType) dbPayload.meal_type = updates.mealType;
+        if (updates.notes !== undefined) dbPayload.notes = updates.notes;
+        await supabase.from("meals").update(dbPayload).eq("id", mealId);
+      } catch (err) {
+        console.warn("Could not update meal in Supabase:", err);
+      }
+    }
+
+    const currentMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
+    let updated: StoredMeal | null = null;
+    const nextList = currentMeals.map((m) => {
+      if (m.id === mealId) {
+        updated = {
+          ...m,
+          eatenAt: updates.eatenAt ?? m.eatenAt,
+          mealType: updates.mealType ?? m.mealType,
+          notes: updates.notes !== undefined ? updates.notes : m.notes,
+        };
+        return updated;
+      }
+      return m;
+    });
+
+    setStorage("meals", nextList);
+    return updated;
   },
 
   // Sync unsynced local meals to Supabase safely (manual trigger only, deduplicated)

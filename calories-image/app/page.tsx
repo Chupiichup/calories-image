@@ -205,9 +205,22 @@ export default function Home() {
   // Handler: Save Meal
   const handleSaveMeal = async (mealData: any) => {
     await repository.saveMeal(mealData);
-    const todayStr = getLocalDateString();
-    setSelectedDate(todayStr);
-    await loadData(todayStr);
+    const mealDate = getLocalDateString(mealData.eatenAt);
+    setSelectedDate(mealDate);
+    await loadData(mealDate);
+  };
+
+  // Handler: Update Meal Time / Type
+  const handleUpdateMeal = async (
+    mealId: string,
+    updates: {
+      eatenAt?: string;
+      mealType?: "breakfast" | "lunch" | "dinner" | "snack";
+      notes?: string;
+    },
+  ) => {
+    await repository.updateMeal(mealId, updates);
+    await loadData(selectedDate);
   };
 
   // Handler: Delete Meal
@@ -305,6 +318,7 @@ export default function Home() {
             onDateChange={setSelectedDate}
             onOpenMealLog={handleOpenMealLog}
             onDeleteMeal={handleDeleteMeal}
+            onUpdateMeal={handleUpdateMeal}
           />
         )}
 

@@ -13,10 +13,17 @@ import {
   Search,
   RefreshCw,
   Info,
+  Calendar,
+  Clock,
 } from "lucide-react";
 import { SEED_FOODS, searchFoods, type FoodItem } from "@/lib/data/seedFoods";
 import { scaleNutritionValues, round, type NutritionValues } from "@/lib/nutrition";
-import type { StoredMeal } from "@/lib/db/repository";
+import {
+  formatToVietnamDateTimeLocal,
+  vietnamDateTimeLocalToIso,
+  getLocalDateString,
+  type StoredMeal,
+} from "@/lib/db/repository";
 
 interface MealLoggerModalProps {
   isOpen: boolean;
@@ -60,6 +67,7 @@ export function MealLoggerModal({
 }: MealLoggerModalProps) {
   const [mode, setMode] = useState<"photo" | "manual">(initialMode);
   const [mealType, setMealType] = useState<"breakfast" | "lunch" | "dinner" | "snack">("lunch");
+  const [eatenAtLocal, setEatenAtLocal] = useState<string>(() => formatToVietnamDateTimeLocal(new Date()));
   const [notes, setNotes] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
@@ -86,6 +94,13 @@ export function MealLoggerModal({
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Default eatenAt to the photo file's last modified timestamp if available, else current VN time
+      if (file.lastModified && file.lastModified > 946684800000 && file.lastModified <= Date.now() + 60000) {
+        setEatenAtLocal(formatToVietnamDateTimeLocal(new Date(file.lastModified)));
+      } else {
+        setEatenAtLocal(formatToVietnamDateTimeLocal(new Date()));
+      }
+
       if (file.size > 15 * 1024 * 1024) {
         setAnalysisError("Kích thước tệp vượt quá 15MB. Vui lòng chọn ảnh nhỏ hơn.");
         return;
@@ -318,7 +333,7 @@ export function MealLoggerModal({
 
     await onSaveMeal({
       mealType,
-      eatenAt: new Date().toISOString(),
+      eatenAt: vietnamDateTimeLocalToIso(eatenAtLocal),
       notes,
       analysisStatus: hasAi ? "ai_confirmed" : "manual",
       items: items.map((it) => ({
@@ -398,6 +413,82 @@ export function MealLoggerModal({
                 </button>
               );
             })}
+          </div>
+
+          {/* Meal Date & Time Picker (Vietnam Time: UTC+7) */}
+          <div className="rounded-2xl border border-stone-200 bg-stone-50/70 p-3.5 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
+                <Calendar className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Thời gian dùng bữa (Giờ Việt Nam):</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="datetime-local"
+                  value={eatenAtLocal}
+                  onChange={(e) => setEatenAtLocal(e.target.value)}
+                  className="rounded-xl border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-900 shadow-sm focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Quick Date Presets */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[10px] font-medium text-stone-500 mr-1">Chọn nhanh:</span>
+              <button
+                type="button"
+                onClick={() => setEatenAtLocal(formatToVietnamDateTimeLocal(new Date()))}
+                className="rounded-lg bg-white border border-stone-200 px-2 py-0.5 text-[10px] font-semibold text-stone-700 hover:bg-stone-100 hover:border-emerald-500 transition"
+              >
+                Hiện tại
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const todayStr = getLocalDateString();
+                  setEatenAtLocal(`${todayStr}T08:00`);
+                  setMealType("breakfast");
+                }}
+                className="rounded-lg bg-white border border-stone-200 px-2 py-0.5 text-[10px] font-semibold text-stone-700 hover:bg-stone-100 hover:border-emerald-500 transition"
+              >
+                Sáng nay (08:00)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const todayStr = getLocalDateString();
+                  setEatenAtLocal(`${todayStr}T12:30`);
+                  setMealType("lunch");
+                }}
+                className="rounded-lg bg-white border border-stone-200 px-2 py-0.5 text-[10px] font-semibold text-stone-700 hover:bg-stone-100 hover:border-emerald-500 transition"
+              >
+                Trưa nay (12:30)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const todayStr = getLocalDateString();
+                  setEatenAtLocal(`${todayStr}T19:00`);
+                  setMealType("dinner");
+                }}
+                className="rounded-lg bg-white border border-stone-200 px-2 py-0.5 text-[10px] font-semibold text-stone-700 hover:bg-stone-100 hover:border-emerald-500 transition"
+              >
+                Tối nay (19:00)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const yesterday = new Date();
+                  yesterday.setDate(yesterday.getDate() - 1);
+                  const yStr = getLocalDateString(yesterday);
+                  setEatenAtLocal(`${yStr}T19:00`);
+                  setMealType("dinner");
+                }}
+                className="rounded-lg bg-white border border-stone-200 px-2 py-0.5 text-[10px] font-semibold text-stone-700 hover:bg-stone-100 hover:border-emerald-500 transition"
+              >
+                Tối hôm qua (19:00)
+              </button>
+            </div>
           </div>
 
           {/* Photo Mode Section */}

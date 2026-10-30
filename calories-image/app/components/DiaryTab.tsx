@@ -10,8 +10,15 @@ import {
   Clock,
   Sparkles,
   Flame,
+  Edit3,
 } from "lucide-react";
-import { StoredMeal, StoredGoal, getLocalDateString } from "@/lib/db/repository";
+import {
+  StoredMeal,
+  StoredGoal,
+  getLocalDateString,
+  formatToVietnamDateTimeLocal,
+  vietnamDateTimeLocalToIso,
+} from "@/lib/db/repository";
 import { round } from "@/lib/nutrition";
 
 interface DiaryTabProps {
@@ -21,6 +28,14 @@ interface DiaryTabProps {
   onDateChange: (date: string) => void;
   onOpenMealLog: (mode: "photo" | "manual") => void;
   onDeleteMeal: (mealId: string) => Promise<void>;
+  onUpdateMeal?: (
+    mealId: string,
+    updates: {
+      eatenAt?: string;
+      mealType?: "breakfast" | "lunch" | "dinner" | "snack";
+      notes?: string;
+    },
+  ) => Promise<void>;
 }
 
 export function DiaryTab({
@@ -30,7 +45,17 @@ export function DiaryTab({
   onDateChange,
   onOpenMealLog,
   onDeleteMeal,
+  onUpdateMeal,
 }: DiaryTabProps) {
+  const [editingMealId, setEditingMealId] = useState<string | null>(null);
+  const [editTimeVal, setEditTimeVal] = useState<string>("");
+  const [editTypeVal, setEditTypeVal] = useState<"breakfast" | "lunch" | "dinner" | "snack">("lunch");
+
+  const handleStartEdit = (meal: StoredMeal) => {
+    setEditingMealId(meal.id);
+    setEditTimeVal(formatToVietnamDateTimeLocal(new Date(meal.eatenAt)));
+    setEditTypeVal(meal.mealType);
+  };
   // Navigation helpers for dates
   const handlePrevDay = () => {
     const current = new Date(`${selectedDate}T12:00:00`);
@@ -166,31 +191,97 @@ export function DiaryTab({
                       key={meal.id}
                       className="rounded-2xl border border-stone-100 bg-stone-50/60 p-3 space-y-2 hover:bg-stone-50 transition"
                     >
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="flex items-center gap-1 font-medium text-stone-500">
-                            <Clock className="h-3 w-3" />
-                            {new Date(meal.eatenAt).toLocaleTimeString("vi-VN", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                          {meal.analysisStatus === "ai_confirmed" && (
-                            <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
-                              <Sparkles className="h-2.5 w-2.5" />
-                              AI Vision
-                            </span>
-                          )}
+                      {editingMealId === meal.id ? (
+                        <div className="rounded-xl border border-emerald-300 bg-white p-3 space-y-2.5 shadow-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-stone-900">Đổi ngày giờ & loại bữa:</span>
+                            <span className="text-[10px] text-emerald-700 font-medium">Giờ Việt Nam (UTC+7)</span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] text-stone-500 font-semibold block mb-0.5">Ngày & giờ dùng bữa:</label>
+                              <input
+                                type="datetime-local"
+                                value={editTimeVal}
+                                onChange={(e) => setEditTimeVal(e.target.value)}
+                                className="w-full rounded-xl border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-xs font-semibold text-stone-900 focus:bg-white focus:border-emerald-500 focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-stone-500 font-semibold block mb-0.5">Loại bữa:</label>
+                              <select
+                                value={editTypeVal}
+                                onChange={(e) => setEditTypeVal(e.target.value as any)}
+                                className="w-full rounded-xl border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-xs font-semibold text-stone-900 focus:bg-white focus:border-emerald-500 focus:outline-none"
+                              >
+                                <option value="breakfast">Bữa sáng</option>
+                                <option value="lunch">Bữa trưa</option>
+                                <option value="dinner">Bữa tối</option>
+                                <option value="snack">Bữa phụ & Ăn vặt</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-end gap-2 pt-1">
+                            <button
+                              onClick={() => setEditingMealId(null)}
+                              className="rounded-xl px-3 py-1 text-xs font-medium text-stone-600 hover:bg-stone-100 transition"
+                            >
+                              Hủy
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (onUpdateMeal) {
+                                  await onUpdateMeal(meal.id, {
+                                    eatenAt: vietnamDateTimeLocalToIso(editTimeVal),
+                                    mealType: editTypeVal,
+                                  });
+                                }
+                                setEditingMealId(null);
+                              }}
+                              className="rounded-xl bg-emerald-600 px-3.5 py-1 text-xs font-semibold text-white shadow hover:bg-emerald-700 transition"
+                            >
+                              Lưu thay đổi
+                            </button>
+                          </div>
                         </div>
+                      ) : (
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="flex items-center gap-1 font-medium text-stone-500">
+                              <Clock className="h-3 w-3" />
+                              {new Date(meal.eatenAt).toLocaleTimeString("vi-VN", {
+                                timeZone: "Asia/Ho_Chi_Minh",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                            {meal.analysisStatus === "ai_confirmed" && (
+                              <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                                <Sparkles className="h-2.5 w-2.5" />
+                                AI Vision
+                              </span>
+                            )}
+                          </div>
 
-                        <button
-                          onClick={() => onDeleteMeal(meal.id)}
-                          className="text-stone-400 hover:text-rose-600 transition"
-                          title="Xóa bữa ăn này"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleStartEdit(meal)}
+                              className="flex items-center gap-1 text-stone-400 hover:text-emerald-700 transition"
+                              title="Chỉnh sửa ngày giờ bữa ăn"
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                              <span className="text-[10px] hidden sm:inline">Sửa giờ</span>
+                            </button>
+                            <button
+                              onClick={() => onDeleteMeal(meal.id)}
+                              className="text-stone-400 hover:text-rose-600 transition"
+                              title="Xóa bữa ăn này"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Food Items in Meal */}
                       <div className="divide-y divide-stone-100">
