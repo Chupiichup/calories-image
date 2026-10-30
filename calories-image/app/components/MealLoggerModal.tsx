@@ -3,6 +3,7 @@
 import React, { useState, useRef } from "react";
 import {
   Camera,
+  Image as ImageIcon,
   Upload,
   Plus,
   Trash2,
@@ -75,7 +76,8 @@ export function MealLoggerModal({
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -382,17 +384,28 @@ export function MealLoggerModal({
                       alt="Ảnh bữa ăn"
                       className="mx-auto max-h-52 rounded-xl object-cover shadow"
                     />
-                    <div className="flex justify-center gap-2">
+                    <div className="flex flex-wrap items-center justify-center gap-2">
                       <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="rounded-xl border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50"
+                        type="button"
+                        onClick={() => galleryInputRef.current?.click()}
+                        className="flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50 active:scale-95 transition"
                       >
-                        Chọn ảnh khác
+                        <ImageIcon className="h-3.5 w-3.5 text-stone-500" />
+                        <span>Thư viện ảnh</span>
                       </button>
                       <button
+                        type="button"
+                        onClick={() => cameraInputRef.current?.click()}
+                        className="flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50 active:scale-95 transition"
+                      >
+                        <Camera className="h-3.5 w-3.5 text-stone-500" />
+                        <span>Chụp ảnh mới</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={handleAnalyzePhoto}
                         disabled={isAnalyzing}
-                        className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow hover:bg-emerald-700 disabled:opacity-50"
+                        className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow hover:bg-emerald-700 disabled:opacity-50 active:scale-95 transition"
                       >
                         {isAnalyzing ? (
                           <>
@@ -409,26 +422,65 @@ export function MealLoggerModal({
                     </div>
                   </div>
                 ) : (
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    className="cursor-pointer py-6 space-y-2"
-                  >
-                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-                      <Camera className="h-6 w-6" />
+                  <div className="py-4 space-y-4">
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-stone-800">
+                        Thêm ảnh món ăn để AI ước lượng dinh dưỡng
+                      </p>
+                      <p className="text-xs text-stone-500">
+                        Chụp trực tiếp từ camera hoặc chọn ảnh có sẵn trong thư viện
+                      </p>
                     </div>
-                    <p className="text-sm font-semibold text-stone-800">
-                      Nhấn vào đây để Chụp ảnh hoặc Tải ảnh lên
-                    </p>
-                    <p className="text-xs text-stone-500">
-                      Hỗ trợ JPEG, PNG, WebP (Tối đa 5MB). AI tự động nhận diện khẩu phần.
+
+                    <div className="grid grid-cols-2 gap-3 max-w-xs mx-auto">
+                      {/* Nút 1: Chụp ảnh từ Camera */}
+                      <button
+                        type="button"
+                        onClick={() => cameraInputRef.current?.click()}
+                        className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-emerald-500/30 bg-emerald-50/60 p-4 text-emerald-900 transition hover:bg-emerald-100 hover:border-emerald-500 active:scale-[0.98]"
+                      >
+                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm">
+                          <Camera className="h-5 w-5" />
+                        </div>
+                        <span className="text-xs font-bold">Chụp ảnh</span>
+                        <span className="text-[10px] text-emerald-700 font-medium">Mở máy ảnh</span>
+                      </button>
+
+                      {/* Nút 2: Tải từ Thư viện ảnh / Gallery */}
+                      <button
+                        type="button"
+                        onClick={() => galleryInputRef.current?.click()}
+                        className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-stone-200 bg-white p-4 text-stone-700 transition hover:bg-stone-50 hover:border-stone-400 active:scale-[0.98] shadow-sm"
+                      >
+                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-stone-100 text-stone-700">
+                          <ImageIcon className="h-5 w-5" />
+                        </div>
+                        <span className="text-xs font-bold">Thư viện</span>
+                        <span className="text-[10px] text-stone-500 font-medium">Chọn từ máy</span>
+                      </button>
+                    </div>
+
+                    <p className="text-[11px] text-stone-400">
+                      Hỗ trợ JPEG, PNG, WebP (Tối đa 15MB). Tự động tối ưu dung lượng khi gửi.
                     </p>
                   </div>
                 )}
+
+                {/* Input 1: Máy ảnh trực tiếp (capture environment) */}
                 <input
-                  ref={fileInputRef}
+                  ref={cameraInputRef}
                   type="file"
                   accept="image/*"
                   capture="environment"
+                  className="hidden"
+                  onChange={handleImageChange}
+                />
+
+                {/* Input 2: Thư viện ảnh (không dùng capture để mở gallery) */}
+                <input
+                  ref={galleryInputRef}
+                  type="file"
+                  accept="image/*"
                   className="hidden"
                   onChange={handleImageChange}
                 />
