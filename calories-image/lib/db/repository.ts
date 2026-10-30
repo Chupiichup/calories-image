@@ -314,13 +314,29 @@ export const repository = {
             }));
 
             // Fallback recovery: if meal_items is empty in DB (e.g. from previously failed UUID insert),
-            // recover full items and macros from local backup
+            // recover full items and macros from local backup AND auto-repair in Supabase
             if (mappedItems.length === 0) {
               const matched = localMeals.find(
                 (lm) => lm.id === m.id || lm.eatenAt === m.eaten_at,
               );
               if (matched && matched.items && matched.items.length > 0) {
                 mappedItems = matched.items;
+                // Auto-repair in Supabase so other devices (e.g. laptop) get the items too!
+                const itemsToRepair = matched.items.map((it) => ({
+                  meal_id: m.id,
+                  food_id: isValidUUID(it.foodId) ? it.foodId : null,
+                  food_name_snapshot: it.foodNameSnapshot,
+                  portion_g: it.portionG,
+                  calories: it.calories,
+                  protein: it.protein,
+                  carbs: it.carbs,
+                  fat: it.fat,
+                  fiber: it.fiber,
+                  nutrition_source: it.nutritionSource,
+                  is_ai_estimated: it.isAiEstimated,
+                  confidence: it.confidence || null,
+                }));
+                supabase.from("meal_items").insert(itemsToRepair).then();
               }
             }
 
@@ -390,6 +406,22 @@ export const repository = {
               );
               if (matched && matched.items && matched.items.length > 0) {
                 mappedItems = matched.items;
+                // Auto-repair in Supabase
+                const itemsToRepair = matched.items.map((it) => ({
+                  meal_id: m.id,
+                  food_id: isValidUUID(it.foodId) ? it.foodId : null,
+                  food_name_snapshot: it.foodNameSnapshot,
+                  portion_g: it.portionG,
+                  calories: it.calories,
+                  protein: it.protein,
+                  carbs: it.carbs,
+                  fat: it.fat,
+                  fiber: it.fiber,
+                  nutrition_source: it.nutritionSource,
+                  is_ai_estimated: it.isAiEstimated,
+                  confidence: it.confidence || null,
+                }));
+                supabase.from("meal_items").insert(itemsToRepair).then();
               }
             }
 
@@ -531,6 +563,92 @@ export const repository = {
       "meals",
       currentMeals.filter((m) => m.id !== mealId),
     );
+  },
+
+  // Auto-sync unsynced local meals and repair empty meal_items in Supabase
+  async syncLocalMealsToSupabase(): Promise<void> {
+    const supabase = createClient();
+    if (!supabase) return;
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const localMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
+      if (!localMeals || localMeals.length === 0) return;
+
+      // 1. Fetch remote meals with their meal_items
+      const { data: remoteMeals } = await supabase
+        .from("meals")
+        .select("id, eaten_at, meal_items(id)")
+        .eq("user_id", user.id);
+
+      const remoteMealMap = new Map<string, { id: string; itemCount: number }>();
+      (remoteMeals || []).forEach((rm: any) => {
+        remoteMealMap.set(rm.eaten_at, {
+          id: rm.id,
+          itemCount: Array.isArray(rm.meal_items) ? rm.meal_items.length : 0,
+        });
+      });
+
+      // 2. Iterate through local meals to repair or upload
+      for (const lm of localMeals) {
+        const existingRemote = remoteMealMap.get(lm.eatenAt);
+
+        if (!existingRemote) {
+          // Meal does not exist in Supabase at all - upload it!
+          const { data: dbMeal, error: mErr } = await supabase
+            .from("meals")
+            .insert({
+              user_id: user.id,
+              eaten_at: lm.eatenAt,
+              meal_type: lm.mealType,
+              notes: lm.notes || null,
+              analysis_status: lm.analysisStatus,
+            })
+            .select()
+            .single();
+
+          if (dbMeal && !mErr && lm.items && lm.items.length > 0) {
+            const itemsToInsert = lm.items.map((it) => ({
+              meal_id: dbMeal.id,
+              food_id: isValidUUID(it.foodId) ? it.foodId : null,
+              food_name_snapshot: it.foodNameSnapshot,
+              portion_g: it.portionG,
+              calories: it.calories,
+              protein: it.protein,
+              carbs: it.carbs,
+              fat: it.fat,
+              fiber: it.fiber,
+              nutrition_source: it.nutritionSource,
+              is_ai_estimated: it.isAiEstimated,
+              confidence: it.confidence || null,
+            }));
+            await supabase.from("meal_items").insert(itemsToInsert);
+          }
+        } else if (existingRemote.itemCount === 0 && lm.items && lm.items.length > 0) {
+          // Meal exists in Supabase, but meal_items was empty (repair it!)
+          const itemsToInsert = lm.items.map((it) => ({
+            meal_id: existingRemote.id,
+            food_id: isValidUUID(it.foodId) ? it.foodId : null,
+            food_name_snapshot: it.foodNameSnapshot,
+            portion_g: it.portionG,
+            calories: it.calories,
+            protein: it.protein,
+            carbs: it.carbs,
+            fat: it.fat,
+            fiber: it.fiber,
+            nutrition_source: it.nutritionSource,
+            is_ai_estimated: it.isAiEstimated,
+            confidence: it.confidence || null,
+          }));
+          await supabase.from("meal_items").insert(itemsToInsert);
+        }
+      }
+    } catch (err) {
+      console.error("Auto-sync to Supabase error:", err);
+    }
   },
 
   // 3. Weight Tracking

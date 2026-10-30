@@ -28,6 +28,7 @@ export default function Home() {
 
   // Current authenticated user state
   const [currentUser, setCurrentUser] = useState<{ id: string; email?: string } | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Core reactive data states
   const [profile, setProfile] = useState<StoredProfile | null>(null);
@@ -84,12 +85,62 @@ export default function Home() {
     };
   }, []);
 
+  // Auto-refresh when tab is focused or becomes visible (cross-device sync)
+  useEffect(() => {
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        loadData();
+      }
+    };
+
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+
+    return () => {
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+    };
+  }, [selectedDate]);
+
+  // Realtime subscription for cross-device updates
+  useEffect(() => {
+    const supabase = createClient();
+    if (!supabase || !currentUser) return;
+
+    const channel = supabase
+      .channel("cross-device-sync")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "meals" },
+        () => {
+          loadData();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "meal_items" },
+        () => {
+          loadData();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser, selectedDate]);
+
   // Load data whenever selectedDate changes
   const loadData = async (dateForDiary?: string) => {
     try {
       setIsLoading(true);
       const isSupabaseActive = isSupabaseConfigured();
       setIsDemoMode(!isSupabaseActive);
+
+      // Perform background sync of any unsynced local meals or repaired items
+      if (isSupabaseActive) {
+        await repository.syncLocalMealsToSupabase().catch(() => {});
+      }
 
       const todayStr = getLocalDateString();
       const targetDiaryDate = dateForDiary || selectedDate || todayStr;
@@ -127,6 +178,17 @@ export default function Home() {
       loadData(selectedDate);
     }
   }, [selectedDate]);
+
+  // Handler: Manual Sync Button
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      await repository.syncLocalMealsToSupabase();
+      await loadData();
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Handler: Open Meal Logger Modal
   const handleOpenMealLog = (mode: "photo" | "manual") => {
@@ -211,6 +273,8 @@ export default function Home() {
         isDemoMode={isDemoMode}
         onOpenAuth={() => setIsAuthModalOpen(true)}
         currentUser={currentUser}
+        onSync={handleManualSync}
+        isSyncing={isSyncing}
       />
 
       {/* Main Tab Content */}

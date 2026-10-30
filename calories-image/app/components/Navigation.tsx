@@ -11,6 +11,7 @@ import {
   Settings,
   ShieldCheck,
   LogIn,
+  RefreshCw,
 } from "lucide-react";
 
 export type TabType =
@@ -28,6 +29,8 @@ interface NavigationProps {
   isDemoMode: boolean;
   onOpenAuth: () => void;
   currentUser?: { id: string; email?: string } | null;
+  onSync?: () => void;
+  isSyncing?: boolean;
 }
 
 export function Navigation({
@@ -36,6 +39,8 @@ export function Navigation({
   isDemoMode,
   onOpenAuth,
   currentUser,
+  onSync,
+  isSyncing,
 }: NavigationProps) {
   const navItems: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: "dashboard", label: "Tổng quan", icon: LayoutDashboard },
@@ -91,6 +96,18 @@ export function Navigation({
 
           {/* User Account / Mode Indicator */}
           <div className="flex items-center gap-2">
+            {currentUser && onSync && (
+              <button
+                type="button"
+                onClick={onSync}
+                disabled={isSyncing}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 shadow-sm transition hover:border-emerald-300 hover:text-emerald-600 active:scale-95 disabled:opacity-60"
+                title="Đồng bộ dữ liệu tức thì"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin text-emerald-600" : ""}`} />
+              </button>
+            )}
+
             {!currentUser ? (
               <button
                 type="button"
