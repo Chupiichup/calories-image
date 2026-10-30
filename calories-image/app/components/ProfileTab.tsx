@@ -9,6 +9,10 @@ import {
   Save,
   CheckCircle2,
   Info,
+  LogIn,
+  LogOut,
+  ShieldCheck,
+  Cloud,
 } from "lucide-react";
 import type { StoredProfile, StoredGoal } from "@/lib/db/repository";
 import {
@@ -27,9 +31,19 @@ interface ProfileTabProps {
     updatedProfile: Omit<StoredProfile, "id" | "updatedAt">,
     updatedGoal: Omit<StoredGoal, "id" | "userId" | "updatedAt">,
   ) => Promise<void>;
+  currentUser?: { id: string; email?: string } | null;
+  onOpenAuth?: () => void;
+  onSignOut?: () => void | Promise<void>;
 }
 
-export function ProfileTab({ profile, goal, onSave }: ProfileTabProps) {
+export function ProfileTab({
+  profile,
+  goal,
+  onSave,
+  currentUser,
+  onOpenAuth,
+  onSignOut,
+}: ProfileTabProps) {
   const [age, setAge] = useState(profile.ageYears);
   const [height, setHeight] = useState(profile.heightCm);
   const [currentWeight, setCurrentWeight] = useState(goal.currentWeightKg);
@@ -90,6 +104,68 @@ export function ProfileTab({ profile, goal, onSave }: ProfileTabProps) {
 
   return (
     <div className="space-y-6">
+      {/* Account Info & Status Card */}
+      <div className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white font-bold text-xl shadow-md shadow-emerald-500/20">
+              {currentUser?.email ? (
+                currentUser.email.charAt(0).toUpperCase()
+              ) : (
+                <User className="h-7 w-7 text-white" />
+              )}
+              {currentUser && (
+                <span className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full bg-emerald-500 ring-2 ring-white" />
+              )}
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base font-bold text-stone-900">
+                  {currentUser?.email ? currentUser.email : "Tài khoản Khách (Chưa đăng nhập)"}
+                </h2>
+                {currentUser ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                    Đã đăng nhập Supabase Cloud
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-0.5 text-xs font-semibold text-stone-600">
+                    Lưu trữ cục bộ thiết bị
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-stone-500 mt-1">
+                {currentUser
+                  ? `Mã định danh (UID): ${currentUser.id.slice(0, 8)}... - Dữ liệu dinh dưỡng được phân tách và bảo vệ an toàn theo tài khoản riêng.`
+                  : "Dữ liệu hiện chỉ lưu trên trình duyệt của máy này. Hãy đăng nhập để lưu trữ trên Cloud và đồng bộ khi dùng trên điện thoại."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+            {currentUser ? (
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="flex items-center gap-1.5 rounded-xl border border-stone-200 bg-stone-50 px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 active:scale-95 transition"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Đăng xuất</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenAuth}
+                className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 active:scale-95 transition"
+              >
+                <LogIn className="h-3.5 w-3.5" />
+                <span>Đăng nhập / Đăng ký</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Safety Notice regarding medical disclaimer */}
       <div className="rounded-3xl border border-amber-200 bg-amber-50/80 p-4 text-xs text-amber-900 flex items-start gap-3">
         <Info className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />

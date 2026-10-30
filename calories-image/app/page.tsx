@@ -19,10 +19,14 @@ import {
 } from "@/lib/db/repository";
 import { generateNutritionCoachingInsights } from "@/lib/coaching";
 import { isSupabaseConfigured } from "@/lib/env";
+import { createClient } from "@/lib/supabase/client";
 
 export default function Home() {
   const [currentTab, setCurrentTab] = useState<TabType>("dashboard");
   const [selectedDate, setSelectedDate] = useState<string>("");
+
+  // Current authenticated user state
+  const [currentUser, setCurrentUser] = useState<{ id: string; email?: string } | null>(null);
 
   // Core reactive data states
   const [profile, setProfile] = useState<StoredProfile | null>(null);
@@ -41,6 +45,41 @@ export default function Home() {
   // Initialize selected date on client mount
   useEffect(() => {
     setSelectedDate(new Date().toISOString().split("T")[0]);
+  }, []);
+
+  // Listen to Supabase Auth state and session
+  useEffect(() => {
+    const supabase = createClient();
+    if (!supabase) {
+      setCurrentUser(null);
+      setIsDemoMode(true);
+      return;
+    }
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        setCurrentUser({ id: user.id, email: user.email });
+        setIsDemoMode(false);
+      } else {
+        setCurrentUser(null);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setCurrentUser({ id: session.user.id, email: session.user.email });
+        setIsDemoMode(false);
+      } else {
+        setCurrentUser(null);
+      }
+      loadData();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Load data whenever selectedDate changes
@@ -118,6 +157,16 @@ export default function Home() {
     setGoal(updatedG);
   };
 
+  // Handler: Sign Out
+  const handleSignOut = async () => {
+    const supabase = createClient();
+    if (supabase) {
+      await supabase.auth.signOut();
+      setCurrentUser(null);
+      await loadData();
+    }
+  };
+
   if (isLoading || !profile || !goal) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-stone-100">
@@ -148,6 +197,7 @@ export default function Home() {
         }}
         isDemoMode={isDemoMode}
         onOpenAuth={() => setIsAuthModalOpen(true)}
+        currentUser={currentUser}
       />
 
       {/* Main Tab Content */}
@@ -193,6 +243,9 @@ export default function Home() {
             profile={profile}
             goal={goal}
             onSave={handleSaveProfileAndGoal}
+            currentUser={currentUser}
+            onOpenAuth={() => setIsAuthModalOpen(true)}
+            onSignOut={handleSignOut}
           />
         )}
 
