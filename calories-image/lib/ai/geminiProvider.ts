@@ -18,12 +18,16 @@ export class GeminiVisionProvider implements IAiVisionProvider {
   private apiKey: string;
   private timeoutMs: number;
 
-  constructor(apiKey: string, modelName = "gemini-2.5-flash", timeoutMs = 45000) {
+  constructor(apiKey: string, modelName = "gemini-2.0-flash", timeoutMs = 25000) {
     this.apiKey = (apiKey || "").trim().replace(/^["']|["']$/g, "");
-    this.modelName = (modelName || "gemini-2.5-flash")
+    let cleanModel = (modelName || "gemini-2.0-flash")
       .trim()
       .replace(/^["']|["']$/g, "")
       .replace(/^models\//, "");
+    if (cleanModel.includes("2.5")) {
+      cleanModel = cleanModel.replace("2.5", "2.0");
+    }
+    this.modelName = cleanModel;
     this.timeoutMs = timeoutMs;
   }
 
@@ -74,9 +78,13 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
 
     for (const ver of ["v1beta", "v1"]) {
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
         const listRes = await fetch(`https://generativelanguage.googleapis.com/${ver}/models?key=${cleanKey}`, {
           headers: { "x-goog-api-key": cleanKey },
+          signal: controller.signal,
         });
+        clearTimeout(timeout);
         const listData = await listRes.json();
 
         if (!listRes.ok) {
@@ -85,8 +93,7 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
             if (
               listRes.status === 400 ||
               listRes.status === 403 ||
-              listData.error?.status === "PERMISSION_DENIED" ||
-              listData.error?.status === "INVALID_ARGUMENT"
+              listData.error?.status === "PERMISSION_DENIED"
             ) {
               throw new Error(
                 `Google Gemini API (${listRes.status} ${listData.error.status || ""}): ${listData.error.message}`
@@ -126,7 +133,7 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
     if (candidateModels.length > 0) {
       // Exclude preview-image, audio, tts, robotics, tool-only models
       const isUnsuitableModel = (name: string) =>
-        /tts|transcribe|audio|speech|robotics|computer-use|banana|clip|argon|preview-image|-image\b/i.test(name);
+        /tts|transcribe|audio|speech|robotics|computer-use|banana|clip|argon|preview-image|-image\b|embedding|aqa/i.test(name);
 
       candidateModels = candidateModels.filter((c) => !isUnsuitableModel(c.shortName));
 
@@ -137,51 +144,49 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         if (a.shortName === this.modelName || a.shortName.includes(this.modelName)) scoreA += 100;
         if (b.shortName === this.modelName || b.shortName.includes(this.modelName)) scoreB += 100;
 
-        // Prioritize Flash-Lite models first for ultra-fast (sub-2s) execution without thinking stalls
-        if (a.shortName === "gemini-2.5-flash-lite") scoreA += 85;
-        if (b.shortName === "gemini-2.5-flash-lite") scoreB += 85;
+        // Prioritize Gemini 2.0 Flash first (fastest, latest multimodal architecture)
+        if (a.shortName === "gemini-2.0-flash") scoreA += 90;
+        if (b.shortName === "gemini-2.0-flash") scoreB += 90;
 
-        if (a.shortName === "gemini-flash-lite-latest") scoreA += 80;
-        if (b.shortName === "gemini-flash-lite-latest") scoreB += 80;
+        if (a.shortName.includes("2.0-flash")) scoreA += 85;
+        if (b.shortName.includes("2.0-flash")) scoreB += 85;
 
-        if (a.shortName === "gemini-2.5-flash") scoreA += 75;
-        if (b.shortName === "gemini-2.5-flash") scoreB += 75;
+        // Gemini 1.5 Flash
+        if (a.shortName === "gemini-1.5-flash") scoreA += 75;
+        if (b.shortName === "gemini-1.5-flash") scoreB += 75;
 
-        if (a.shortName === "gemini-flash-latest") scoreA += 70;
-        if (b.shortName === "gemini-flash-latest") scoreB += 70;
+        // Gemini 1.5 Flash-8b
+        if (a.shortName === "gemini-1.5-flash-8b") scoreA += 70;
+        if (b.shortName === "gemini-1.5-flash-8b") scoreB += 70;
 
-        if (a.shortName.includes("flash-lite")) scoreA += 60;
-        if (b.shortName.includes("flash-lite")) scoreB += 60;
+        if (a.shortName.includes("flash")) scoreA += 50;
+        if (b.shortName.includes("flash")) scoreB += 50;
 
-        if (a.shortName.includes("flash")) scoreA += 30;
-        if (b.shortName.includes("flash")) scoreB += 30;
-
-        if (a.shortName === "gemini-pro-latest" || a.shortName === "gemini-2.5-pro") scoreA += 20;
-        if (b.shortName === "gemini-pro-latest" || b.shortName === "gemini-2.5-pro") scoreB += 20;
+        if (a.shortName === "gemini-1.5-pro" || a.shortName.includes("pro")) scoreA += 20;
+        if (b.shortName === "gemini-1.5-pro" || b.shortName.includes("pro")) scoreB += 20;
 
         return scoreB - scoreA;
       });
     } else {
-      // Fallback static list
+      // High-reliability static fallback list of real, officially supported Google models
       candidateModels = [
-        { version: "v1beta", fullName: "models/gemini-2.5-flash-lite", shortName: "gemini-2.5-flash-lite" },
-        { version: "v1beta", fullName: "models/gemini-flash-lite-latest", shortName: "gemini-flash-lite-latest" },
-        { version: "v1beta", fullName: "models/gemini-2.5-flash", shortName: "gemini-2.5-flash" },
-        { version: "v1beta", fullName: "models/gemini-flash-latest", shortName: "gemini-flash-latest" },
-        { version: "v1", fullName: "models/gemini-2.5-flash", shortName: "gemini-2.5-flash" },
-        { version: "v1beta", fullName: "models/gemini-pro-latest", shortName: "gemini-pro-latest" },
-        { version: "v1beta", fullName: "models/gemini-2.5-pro", shortName: "gemini-2.5-pro" },
+        { version: "v1beta", fullName: "models/gemini-2.0-flash", shortName: "gemini-2.0-flash" },
+        { version: "v1beta", fullName: "models/gemini-1.5-flash", shortName: "gemini-1.5-flash" },
+        { version: "v1beta", fullName: "models/gemini-1.5-flash-8b", shortName: "gemini-1.5-flash-8b" },
+        { version: "v1beta", fullName: "models/gemini-2.0-flash-lite-preview-02-05", shortName: "gemini-2.0-flash-lite-preview-02-05" },
+        { version: "v1beta", fullName: "models/gemini-1.5-pro", shortName: "gemini-1.5-pro" },
       ];
     }
 
     let lastError: Error | null = null;
+    const perAttemptTimeoutMs = Math.min(this.timeoutMs, 18000); // Max 18s per attempt to allow fallback before Vercel timeout
 
     // Step 3: Call generateContent with discovered models
     for (const attempt of candidateModels) {
       const endpoint = `https://generativelanguage.googleapis.com/${attempt.version}/${attempt.fullName}:generateContent?key=${cleanKey}`;
 
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+      const timeout = setTimeout(() => controller.abort(), perAttemptTimeoutMs);
 
       const genConfig: Record<string, any> = {
         responseMimeType: "application/json",
@@ -200,6 +205,7 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
             generationConfig: genConfig,
             contents: [
               {
+                role: "user",
                 parts: [
                   { text: promptText },
                   {
@@ -262,17 +268,17 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
             err.message.includes("abort") ||
             err.message.includes("timeout"))
         ) {
-          // If 503 high demand or 500, pause briefly (600ms) before trying the next model
+          // If 503 high demand or 500, pause briefly (400ms) before trying the next model
           if (
             err.message.includes("503") ||
             err.message.includes("UNAVAILABLE") ||
             err.message.includes("high demand")
           ) {
-            await new Promise((resolve) => setTimeout(resolve, 600));
+            await new Promise((resolve) => setTimeout(resolve, 400));
           }
           continue;
         }
-        // If it's another fatal error like 403, break out and throw
+        // If it's another fatal error like 403 API key invalid, break out and throw
         break;
       } finally {
         clearTimeout(timeout);
@@ -293,6 +299,12 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
     if (lastError?.message && (lastError.message.includes("429") || lastError.message.includes("RESOURCE_EXHAUSTED"))) {
       throw new Error(
         "Tài khoản Google Gemini đã tạm thời hết lượt yêu cầu miễn phí trong ngày (mã 429: Quota exceeded). Bạn có thể bấm '+ Nhập thủ công' ở góc trên để lưu bữa ăn ngay bây giờ, hoặc thử lại sau khi Google làm mới lượt."
+      );
+    }
+
+    if (lastError?.message && (lastError.message.includes("aborted") || lastError.message.includes("timeout"))) {
+      throw new Error(
+        "Thời gian kết nối đến máy chủ AI vượt quá giới hạn. Vui lòng bấm 'Phân tích bằng AI' lại hoặc dùng '+ Nhập thủ công'."
       );
     }
 
