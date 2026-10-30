@@ -188,11 +188,6 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         temperature: 0.2,
       };
 
-      // Disable thinking budget to prevent 28s reasoning stalls on Gemini 2.5 models
-      if (attempt.shortName.includes("2.5") || attempt.shortName.includes("flash")) {
-        genConfig.thinkingConfig = { thinkingBudget: 0 };
-      }
-
       try {
         const response = await fetch(endpoint, {
           method: "POST",
@@ -247,7 +242,7 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         lastError = err;
         console.warn(`Attempt with ${attempt.version}/${attempt.shortName} failed: ${err.message}`);
 
-        // If 404, 429 quota limit, 503 high demand, 500/502/504 server error, or timeout/abort, continue to next candidate!
+        // If 404, 429 quota limit, 400 invalid argument, 503 high demand, 500/502/504 server error, or timeout/abort, continue to next candidate!
         if (
           err.message &&
           (err.message.includes("404") ||
@@ -255,6 +250,8 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
             err.message.includes("429") ||
             err.message.includes("quota") ||
             err.message.includes("RESOURCE_EXHAUSTED") ||
+            err.message.includes("400") ||
+            err.message.includes("INVALID_ARGUMENT") ||
             err.message.includes("503") ||
             err.message.includes("500") ||
             err.message.includes("502") ||
@@ -275,7 +272,7 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
           }
           continue;
         }
-        // If it's a fatal error like 400 or 403, break out and throw
+        // If it's another fatal error like 403, break out and throw
         break;
       } finally {
         clearTimeout(timeout);
