@@ -1,0 +1,43 @@
+# dependencies
+node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+coverage
+
+# next.js
+.next/
+out/
+build
+
+# misc
+.DS_Store
+*.pem
+*.log
+
+# env files
+.env*.local
+.env
+!.env.example
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# nested ignore for calories-image
+calories-image/node_modules/
+calories-image/.next/
+calories-image/out/
+calories-image/build/
+calories-image/.env*.local
+calories-image/.env
+!calories-image/.env.example
