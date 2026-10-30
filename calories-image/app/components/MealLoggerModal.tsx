@@ -43,7 +43,8 @@ type EditableItem = {
   id: string;
   foodId?: string;
   foodName: string;
-  portionG: number;
+  portionG: number | "";
+  baseNutritionPer100g: NutritionValues;
   nutrition: NutritionValues;
   isAiEstimated: boolean;
   confidence?: number;
@@ -185,23 +186,33 @@ export function MealLoggerModal({
       }
 
       // Populate candidate items for user review & editing
-      const detected: EditableItem[] = (data.candidates || []).map((c: any, idx: number) => ({
-        id: `ai-${Date.now()}-${idx}`,
-        foodId: c.standardizedName,
-        foodName: c.name,
-        portionG: c.portionG,
-        nutrition: {
-          calories: c.calories,
-          protein: c.protein,
-          carbs: c.carbs,
-          fat: c.fat,
-          fiber: c.fiber,
-        },
-        isAiEstimated: true,
-        confidence: c.confidence,
-        notes: c.notes,
-        uncertainties: c.uncertainties,
-      }));
+      const detected: EditableItem[] = (data.candidates || []).map((c: any, idx: number) => {
+        const portionG = c.portionG || 100;
+        return {
+          id: `ai-${Date.now()}-${idx}`,
+          foodId: c.standardizedName,
+          foodName: c.name,
+          portionG,
+          baseNutritionPer100g: {
+            calories: (c.calories / portionG) * 100,
+            protein: (c.protein / portionG) * 100,
+            carbs: (c.carbs / portionG) * 100,
+            fat: (c.fat / portionG) * 100,
+            fiber: (c.fiber / portionG) * 100,
+          },
+          nutrition: {
+            calories: c.calories,
+            protein: c.protein,
+            carbs: c.carbs,
+            fat: c.fat,
+            fiber: c.fiber,
+          },
+          isAiEstimated: true,
+          confidence: c.confidence,
+          notes: c.notes,
+          uncertainties: c.uncertainties,
+        };
+      });
 
       setItems(detected);
     } catch (err: any) {
@@ -212,21 +223,30 @@ export function MealLoggerModal({
   };
 
   // Update item portion and recalculate macros proportionally
-  const handlePortionChange = (itemId: string, newGrams: number) => {
-    if (newGrams <= 0) return;
+  const handlePortionChange = (itemId: string, rawVal: string) => {
     setItems((prev) =>
       prev.map((it) => {
         if (it.id === itemId) {
-          const ratio = newGrams / it.portionG;
+          if (rawVal === "") {
+            return {
+              ...it,
+              portionG: "",
+              nutrition: { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 },
+            };
+          }
+          const num = Number(rawVal);
+          if (isNaN(num)) return it;
+          const portionG = Math.max(0, num);
+          const ratio = portionG / 100;
           return {
             ...it,
-            portionG: newGrams,
+            portionG,
             nutrition: {
-              calories: round(it.nutrition.calories * ratio, 1),
-              protein: round(it.nutrition.protein * ratio, 1),
-              carbs: round(it.nutrition.carbs * ratio, 1),
-              fat: round(it.nutrition.fat * ratio, 1),
-              fiber: round(it.nutrition.fiber * ratio, 1),
+              calories: round(it.baseNutritionPer100g.calories * ratio, 1),
+              protein: round(it.baseNutritionPer100g.protein * ratio, 1),
+              carbs: round(it.baseNutritionPer100g.carbs * ratio, 1),
+              fat: round(it.baseNutritionPer100g.fat * ratio, 1),
+              fiber: round(it.baseNutritionPer100g.fiber * ratio, 1),
             },
           };
         }
@@ -249,20 +269,23 @@ export function MealLoggerModal({
 
   // Add food from manual catalog search
   const handleAddCatalogFood = (food: FoodItem) => {
+    const defaultG = food.defaultPortionG || 100;
+    const baseNutrition: NutritionValues = {
+      calories: food.caloriesPer100g,
+      protein: food.proteinPer100g,
+      carbs: food.carbsPer100g,
+      fat: food.fatPer100g,
+      fiber: food.fiberPer100g,
+    };
     const newItem: EditableItem = {
       id: `manual-${Date.now()}`,
       foodId: food.id,
       foodName: food.name,
-      portionG: food.defaultPortionG,
+      portionG: defaultG,
+      baseNutritionPer100g: baseNutrition,
       nutrition: scaleNutritionValues({
-        values: {
-          calories: food.caloriesPer100g,
-          protein: food.proteinPer100g,
-          carbs: food.carbsPer100g,
-          fat: food.fatPer100g,
-          fiber: food.fiberPer100g,
-        },
-        portionG: food.defaultPortionG,
+        values: baseNutrition,
+        portionG: defaultG,
         referenceG: 100,
       }),
       isAiEstimated: false,
@@ -274,11 +297,11 @@ export function MealLoggerModal({
   };
 
   // Calculate totals
-  const totalCals = items.reduce((sum, it) => sum + it.nutrition.calories, 0);
-  const totalProtein = items.reduce((sum, it) => sum + it.nutrition.protein, 0);
-  const totalCarbs = items.reduce((sum, it) => sum + it.nutrition.carbs, 0);
-  const totalFat = items.reduce((sum, it) => sum + it.nutrition.fat, 0);
-  const totalFiber = items.reduce((sum, it) => sum + it.nutrition.fiber, 0);
+  const totalCals = items.reduce((sum, it) => sum + (it.nutrition?.calories || 0), 0);
+  const totalProtein = items.reduce((sum, it) => sum + (it.nutrition?.protein || 0), 0);
+  const totalCarbs = items.reduce((sum, it) => sum + (it.nutrition?.carbs || 0), 0);
+  const totalFat = items.reduce((sum, it) => sum + (it.nutrition?.fat || 0), 0);
+  const totalFiber = items.reduce((sum, it) => sum + (it.nutrition?.fiber || 0), 0);
 
   // Submit and Save Meal
   const handleConfirmSave = async () => {
@@ -297,7 +320,7 @@ export function MealLoggerModal({
       items: items.map((it) => ({
         foodId: it.foodId,
         foodName: it.foodName,
-        portionG: it.portionG,
+        portionG: typeof it.portionG === "number" && it.portionG > 0 ? it.portionG : 100,
         nutrition: it.nutrition,
         isAiEstimated: it.isAiEstimated,
         confidence: it.confidence,
@@ -610,9 +633,9 @@ export function MealLoggerModal({
                         <input
                           type="number"
                           value={it.portionG}
-                          onChange={(e) => handlePortionChange(it.id, Number(e.target.value))}
+                          onChange={(e) => handlePortionChange(it.id, e.target.value)}
                           className="w-16 rounded-lg border border-stone-200 px-2 py-1 text-xs text-center font-bold text-stone-800 focus:border-emerald-500 focus:outline-none"
-                          min="5"
+                          min="0"
                           step="5"
                         />
                         <span className="text-xs text-stone-500">g</span>

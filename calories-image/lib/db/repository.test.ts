@@ -89,3 +89,4 @@ describe("Database Repository & Calorie Tracking", () => {
     expect(remainingCalories).toBe(1455);
   });
 });
+

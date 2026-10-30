@@ -44,10 +44,10 @@ export function ProfileTab({
   onOpenAuth,
   onSignOut,
 }: ProfileTabProps) {
-  const [age, setAge] = useState(profile.ageYears);
-  const [height, setHeight] = useState(profile.heightCm);
-  const [currentWeight, setCurrentWeight] = useState(goal.currentWeightKg);
-  const [goalWeight, setGoalWeight] = useState(goal.goalWeightKg);
+  const [age, setAge] = useState<number | "">(profile.ageYears);
+  const [height, setHeight] = useState<number | "">(profile.heightCm);
+  const [currentWeight, setCurrentWeight] = useState<number | "">(goal.currentWeightKg);
+  const [goalWeight, setGoalWeight] = useState<number | "">(goal.goalWeightKg);
   const [sex, setSex] = useState<BiologicalSex>(profile.sexForBmr);
   const [activity, setActivity] = useState<ActivityLevel>(profile.activityLevel);
   const [pace, setPace] = useState<WeightLossPace>(goal.weightLossPace);
@@ -59,19 +59,22 @@ export function ProfileTab({
   // Compute live deterministic preview of targets
   const calculated = calculateComprehensiveTargets(
     {
-      weightKg: currentWeight || 70,
-      heightCm: height || 170,
-      ageYears: age || 25,
+      weightKg: typeof currentWeight === "number" && currentWeight > 0 ? currentWeight : 70,
+      heightCm: typeof height === "number" && height > 0 ? height : 170,
+      ageYears: typeof age === "number" && age > 0 ? age : 25,
       sex,
       activityLevel: activity,
       isPregnantOrNursing: isSpecialPregnant,
-      isUnder18: age < 18,
+      isUnder18: typeof age === "number" && age < 18,
     },
     pace,
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (age === "" || height === "" || currentWeight === "" || goalWeight === "") {
+      return;
+    }
     setIsSaving(true);
     setSavedSuccess(false);
 
@@ -79,14 +82,14 @@ export function ProfileTab({
       await onSave(
         {
           email: profile.email,
-          ageYears: age,
-          heightCm: height,
+          ageYears: Number(age),
+          heightCm: Number(height),
           sexForBmr: sex,
           activityLevel: activity,
         },
         {
-          currentWeightKg: currentWeight,
-          goalWeightKg: goalWeight,
+          currentWeightKg: Number(currentWeight),
+          goalWeightKg: Number(goalWeight),
           dailyCalorieTarget: calculated.calorieTarget,
           dailyProteinTargetG: calculated.macros.protein,
           dailyCarbTargetG: calculated.macros.carbs,
@@ -191,7 +194,7 @@ export function ProfileTab({
               <input
                 type="number"
                 value={age}
-                onChange={(e) => setAge(Number(e.target.value))}
+                onChange={(e) => setAge(e.target.value === "" ? "" : Number(e.target.value))}
                 min="10"
                 max="100"
                 required
@@ -204,7 +207,7 @@ export function ProfileTab({
               <input
                 type="number"
                 value={height}
-                onChange={(e) => setHeight(Number(e.target.value))}
+                onChange={(e) => setHeight(e.target.value === "" ? "" : Number(e.target.value))}
                 min="100"
                 max="250"
                 required
@@ -218,7 +221,7 @@ export function ProfileTab({
                 type="number"
                 step="0.1"
                 value={currentWeight}
-                onChange={(e) => setCurrentWeight(Number(e.target.value))}
+                onChange={(e) => setCurrentWeight(e.target.value === "" ? "" : Number(e.target.value))}
                 min="30"
                 max="250"
                 required
@@ -232,7 +235,7 @@ export function ProfileTab({
                 type="number"
                 step="0.1"
                 value={goalWeight}
-                onChange={(e) => setGoalWeight(Number(e.target.value))}
+                onChange={(e) => setGoalWeight(e.target.value === "" ? "" : Number(e.target.value))}
                 min="30"
                 max="250"
                 required
