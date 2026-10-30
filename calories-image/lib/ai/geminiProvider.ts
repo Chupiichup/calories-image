@@ -29,20 +29,25 @@ export class GeminiVisionProvider implements IAiVisionProvider {
     mimeType: string;
     userNote?: string;
   }): Promise<MealAnalysisResult> {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelName}:generateContent?key=${this.apiKey}`;
+    const cleanBase64 = params.imageBase64.replace(/^data:[^;]+;base64,/, "").trim();
+    // Gemini API only accepts 'image/jpeg', 'image/png', 'image/webp'
+    const safeMime =
+      params.mimeType === "image/png" || params.mimeType === "image/webp"
+        ? params.mimeType
+        : "image/jpeg";
 
-    const promptText = `Hãy phân tích bữa ăn trong hình ảnh này. ${
-      params.userNote ? `Ghi chú từ người dùng: "${params.userNote}".` : ""
-    }
-Hãy trả về JSON theo schema:
+    const promptText = `${SYSTEM_INSTRUCTION}
+
+Hãy phân tích kỹ lưỡng hình ảnh bữa ăn này${params.userNote ? ` (Ghi chú: ${params.userNote})` : ""}.
+Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải thích bên ngoài JSON) theo cấu trúc sau:
 {
   "mealTypeInferred": "breakfast" | "lunch" | "dinner" | "snack",
   "confidenceOverall": number,
   "candidates": [
     {
-      "name": string (tên món tiếng Việt),
-      "standardizedName": string (slug tiếng Anh nếu có),
-      "portionG": number (khối lượng gram),
+      "name": string (tên món tiếng Việt chính xác theo ảnh),
+      "standardizedName": string,
+      "portionG": number (khối lượng gram ước tính),
       "calories": number (calo),
       "protein": number (đạm g),
       "carbs": number (tinh bột g),
@@ -59,70 +64,87 @@ Hãy trả về JSON theo schema:
   "nutritionalInsight": string
 }`;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    // Try primary model, fallback to alternative models if not available
+    const modelsToTry = Array.from(
+      new Set([this.modelName, "gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]),
+    );
 
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: SYSTEM_INSTRUCTION }],
+    let lastError: Error | null = null;
+
+    for (const model of modelsToTry) {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": this.apiKey,
           },
-          generationConfig: {
-            responseMimeType: "application/json",
-            temperature: 0.2,
-          },
-          contents: [
-            {
-              parts: [
-                { text: promptText },
-                {
-                  inlineData: {
-                    mimeType: params.mimeType,
-                    data: params.imageBase64,
-                  },
-                },
-              ],
+          signal: controller.signal,
+          body: JSON.stringify({
+            generationConfig: {
+              responseMimeType: "application/json",
+              temperature: 0.2,
             },
-          ],
-        }),
-      });
+            contents: [
+              {
+                parts: [
+                  { text: promptText },
+                  {
+                    inlineData: {
+                      mimeType: safeMime,
+                      data: cleanBase64,
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API error (${response.status}): ${errorText}`);
-      }
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Gemini API (${model}) error ${response.status}: ${errorText}`);
+        }
 
-      const json = await response.json();
-      const rawText = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!rawText) {
-        throw new Error("Không nhận được nội dung phân tích từ Gemini API.");
-      }
+        const json = await response.json();
+        const rawText = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawText) {
+          throw new Error("Không nhận được nội dung từ Gemini API.");
+        }
 
-      // Clean potential markdown fences (e.g. ```json ... ```)
-      let cleanedText = rawText.trim();
-      if (cleanedText.startsWith("```json")) {
-        cleanedText = cleanedText.replace(/^```json\s*/i, "");
-      } else if (cleanedText.startsWith("```")) {
-        cleanedText = cleanedText.replace(/^```\s*/i, "");
-      }
-      if (cleanedText.endsWith("```")) {
-        cleanedText = cleanedText.replace(/```\s*$/i, "");
-      }
+        // Clean potential markdown fences (e.g. ```json ... ```)
+        let cleanedText = rawText.trim();
+        if (cleanedText.startsWith("```json")) {
+          cleanedText = cleanedText.replace(/^```json\s*/i, "");
+        } else if (cleanedText.startsWith("```")) {
+          cleanedText = cleanedText.replace(/^```\s*/i, "");
+        }
+        if (cleanedText.endsWith("```")) {
+          cleanedText = cleanedText.replace(/```\s*$/i, "");
+        }
 
-      const parsedData = JSON.parse(cleanedText.trim());
-      return MealAnalysisResponseSchema.parse(parsedData);
-    } catch (err: any) {
-      if (err.name === "AbortError") {
-        throw new Error("Quá thời gian chờ phản hồi từ Gemini API (Timeout).");
+        const parsedData = JSON.parse(cleanedText.trim());
+        return MealAnalysisResponseSchema.parse(parsedData);
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Attempt with model '${model}' failed: ${err.message}`);
+        // If it was a 404 or model not found, loop to next model
+        if (err.message && (err.message.includes("404") || err.message.includes("not found"))) {
+          continue;
+        }
+        // If it's a fatal error like 400 or 403 or abort, break out and throw
+        break;
+      } finally {
+        clearTimeout(timeout);
       }
-      throw err;
-    } finally {
-      clearTimeout(timeout);
     }
+
+    throw lastError || new Error("Không thể phân tích ảnh bằng Gemini Vision.");
   }
 }
 
