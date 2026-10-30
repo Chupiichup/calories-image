@@ -64,15 +64,21 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
   "nutritionalInsight": string
 }`;
 
-    // Try primary model, fallback to alternative models if not available
-    const modelsToTry = Array.from(
-      new Set([this.modelName, "gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]),
-    );
+    // Try both v1 and v1beta with multiple model aliases
+    const attempts = [
+      { version: "v1", model: this.modelName || "gemini-1.5-flash" },
+      { version: "v1beta", model: this.modelName || "gemini-1.5-flash" },
+      { version: "v1beta", model: "gemini-2.0-flash" },
+      { version: "v1beta", model: "gemini-1.5-flash-latest" },
+      { version: "v1", model: "gemini-1.5-flash" },
+      { version: "v1beta", model: "gemini-1.5-pro" },
+      { version: "v1", model: "gemini-1.5-pro" },
+    ];
 
     let lastError: Error | null = null;
 
-    for (const model of modelsToTry) {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+    for (const attempt of attempts) {
+      const endpoint = `https://generativelanguage.googleapis.com/${attempt.version}/models/${attempt.model}:generateContent?key=${this.apiKey}`;
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -108,7 +114,7 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`Gemini API (${model}) error ${response.status}: ${errorText}`);
+          throw new Error(`Gemini API (${attempt.version}/${attempt.model}) error ${response.status}: ${errorText}`);
         }
 
         const json = await response.json();
@@ -132,8 +138,8 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         return MealAnalysisResponseSchema.parse(parsedData);
       } catch (err: any) {
         lastError = err;
-        console.warn(`Attempt with model '${model}' failed: ${err.message}`);
-        // If it was a 404 or model not found, loop to next model
+        console.warn(`Attempt with ${attempt.version}/${attempt.model} failed: ${err.message}`);
+        // If it was a 404 or model not found, try next candidate model/version
         if (err.message && (err.message.includes("404") || err.message.includes("not found"))) {
           continue;
         }
@@ -142,6 +148,58 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
       } finally {
         clearTimeout(timeout);
       }
+    }
+
+    // Dynamic discovery fallback: query ListModels to find active model for this API key
+    try {
+      const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${this.apiKey}`, {
+        headers: { "x-goog-api-key": this.apiKey },
+      });
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const availableModels: Array<{ name: string; supportedGenerationMethods?: string[] }> = listData.models || [];
+        const candidate = availableModels.find(
+          (m) =>
+            m.supportedGenerationMethods?.includes("generateContent") &&
+            (m.name.includes("flash") || m.name.includes("pro")),
+        );
+        if (candidate) {
+          const modelClean = candidate.name.replace(/^models\//, "");
+          const dynEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelClean}:generateContent?key=${this.apiKey}`;
+          const dynRes = await fetch(dynEndpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": this.apiKey,
+            },
+            body: JSON.stringify({
+              generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
+              contents: [
+                {
+                  parts: [
+                    { text: promptText },
+                    { inlineData: { mimeType: safeMime, data: cleanBase64 } },
+                  ],
+                },
+              ],
+            }),
+          });
+
+          if (dynRes.ok) {
+            const dynJson = await dynRes.json();
+            const dynText = dynJson?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (dynText) {
+              let cleaned = dynText.trim();
+              if (cleaned.startsWith("```json")) cleaned = cleaned.replace(/^```json\s*/i, "");
+              if (cleaned.startsWith("```")) cleaned = cleaned.replace(/^```\s*/i, "");
+              if (cleaned.endsWith("```")) cleaned = cleaned.replace(/```\s*$/i, "");
+              return MealAnalysisResponseSchema.parse(JSON.parse(cleaned.trim()));
+            }
+          }
+        }
+      }
+    } catch (listErr) {
+      console.warn("Dynamic ListModels discovery failed:", listErr);
     }
 
     throw lastError || new Error("Không thể phân tích ảnh bằng Gemini Vision.");
