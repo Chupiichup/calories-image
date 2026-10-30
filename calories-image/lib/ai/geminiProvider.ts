@@ -123,19 +123,39 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
       }
     }
 
-    // Step 2: Sort candidates to prioritize best vision model
+    // Step 2: Filter and sort candidates to prioritize best vision model
     if (candidateModels.length > 0) {
+      const isSpecializedNonVision = (name: string) =>
+        /tts|transcribe|audio|speech|robotics|computer-use|banana|clip|argon/i.test(name);
+
       candidateModels.sort((a, b) => {
         let scoreA = 0;
         let scoreB = 0;
-        if (a.shortName === this.modelName || a.shortName.includes(this.modelName)) scoreA += 50;
-        if (b.shortName === this.modelName || b.shortName.includes(this.modelName)) scoreB += 50;
-        if (a.shortName.includes("flash")) scoreA += 20;
-        if (b.shortName.includes("flash")) scoreB += 20;
-        if (a.shortName.includes("2.0")) scoreA += 10;
-        if (b.shortName.includes("2.0")) scoreB += 10;
-        if (a.shortName.includes("1.5")) scoreA += 5;
-        if (b.shortName.includes("1.5")) scoreB += 5;
+
+        if (isSpecializedNonVision(a.shortName)) scoreA -= 200;
+        if (isSpecializedNonVision(b.shortName)) scoreB -= 200;
+
+        if (a.shortName === this.modelName || a.shortName.includes(this.modelName)) scoreA += 100;
+        if (b.shortName === this.modelName || b.shortName.includes(this.modelName)) scoreB += 100;
+
+        if (a.shortName.includes("gemini-2.5-flash")) scoreA += 50;
+        if (b.shortName.includes("gemini-2.5-flash")) scoreB += 50;
+
+        if (a.shortName.includes("flash-latest")) scoreA += 45;
+        if (b.shortName.includes("flash-latest")) scoreB += 45;
+
+        if (a.shortName.includes("flash-image")) scoreA += 40;
+        if (b.shortName.includes("flash-image")) scoreB += 40;
+
+        if (a.shortName.includes("flash")) scoreA += 30;
+        if (b.shortName.includes("flash")) scoreB += 30;
+
+        if (a.shortName.includes("2.5")) scoreA += 15;
+        if (b.shortName.includes("2.5")) scoreB += 15;
+
+        if (a.shortName.includes("pro-latest") || a.shortName.includes("2.5-pro")) scoreA += 10;
+        if (b.shortName.includes("pro-latest") || b.shortName.includes("2.5-pro")) scoreB += 10;
+
         return scoreB - scoreA;
       });
     } else {
