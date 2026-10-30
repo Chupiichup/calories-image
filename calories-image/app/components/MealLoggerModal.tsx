@@ -66,6 +66,7 @@ export function MealLoggerModal({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [aiObservations, setAiObservations] = useState<string | null>(null);
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
 
   // Editable candidate items
   const [items, setItems] = useState<EditableItem[]>([]);
@@ -138,6 +139,9 @@ export function MealLoggerModal({
       }
 
       const data = json.data;
+      if (json.meta?.provider) {
+        setActiveProvider(json.meta.provider);
+      }
       if (data.mealTypeInferred) {
         setMealType(data.mealTypeInferred);
       }
@@ -415,6 +419,25 @@ export function MealLoggerModal({
 
           {/* Items Review & Editing Table */}
           <div className="space-y-3">
+            {activeProvider === "mock" && (
+              <div className="flex items-start gap-2.5 rounded-2xl bg-amber-50 p-3 text-xs text-amber-900 border border-amber-200">
+                <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+                <div className="space-y-1">
+                  <span className="font-bold">Đang hiển thị thực đơn mẫu (Chế độ Mock):</span>
+                  <p className="text-[11px] leading-relaxed text-amber-800">
+                    Ứng dụng chưa nhận diện được ảnh thật vì chưa nhận được khóa <code className="bg-amber-100/80 px-1 py-0.5 rounded font-mono font-semibold">AI_PROVIDER_API_KEY</code> trên Vercel. Hãy thêm biến <code className="bg-amber-100/80 px-1 py-0.5 rounded font-mono font-semibold">AI_PROVIDER_API_KEY</code> trong mục Environment Variables của Vercel và bấm <strong>Redeploy</strong> để kích hoạt Google Gemini Vision!
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {activeProvider === "gemini" && (
+              <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-800 border border-emerald-200">
+                <Sparkles className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>Đã phân tích thành công bằng Google Gemini Vision!</span>
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-stone-900">
                 Thành phần bữa ăn ({items.length} món)

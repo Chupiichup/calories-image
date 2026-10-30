@@ -56,17 +56,10 @@ export async function analyzeMealImageWithProvider(params: {
       latencyMs,
     };
   } catch (error: any) {
-    // If the primary provider failed (e.g. quota exhausted or network error), fallback to mock in development
+    console.error(`AI Provider '${provider.providerName}' error:`, error);
+    // If the configured provider failed, throw the detailed error so the user knows what happened
     if (provider.providerName !== "mock") {
-      console.warn(`AI Provider '${provider.providerName}' failed: ${error.message}. Falling back to mock vision.`);
-      const mockProvider = new MockVisionProvider();
-      const result = await mockProvider.analyzeFoodImage(params);
-      return {
-        result,
-        provider: "mock-fallback",
-        model: mockProvider.modelName,
-        latencyMs: Date.now() - startTime,
-      };
+      throw new Error(`Lỗi gọi ${provider.providerName.toUpperCase()} API: ${error.message || error}`);
     }
     throw error;
   }

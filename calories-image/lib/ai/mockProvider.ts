@@ -146,8 +146,8 @@ export class MockVisionProvider implements IAiVisionProvider {
           uncertainties: ["Lượng dầu mỡ dư đọng trên bề mặt thực phẩm"],
         },
       ],
-      observations: "Bữa ăn cân đối, giàu protein sạch (hơn 58g đạm) hỗ trợ tối ưu duy trì cơ bắp trong khi thâm hụt mỡ.",
-      nutritionalInsight: "Bữa trưa này đáp ứng xuất sắc tiêu chí dinh dưỡng bảo toàn cơ bắp.",
+      observations: "⚠️ [CHẾ ĐỘ MOCK]: Ứng dụng đang chạy ở chế độ giả lập vì chưa nhận được khóa AI_PROVIDER_API_KEY trên Vercel. Để phân tích ảnh thật từ Google Gemini, hãy thêm biến AI_PROVIDER_API_KEY trong Project Settings của Vercel và bấm Redeploy.",
+      nutritionalInsight: "Bữa ăn mẫu giàu protein sạch hỗ trợ duy trì cơ bắp trong khi thâm hụt mỡ.",
     };
   }
 }

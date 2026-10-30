@@ -97,7 +97,17 @@ Trả về định dạng JSON thuần túy theo schema:
         throw new Error("Không nhận được nội dung từ OpenAI API.");
       }
 
-      return MealAnalysisResponseSchema.parse(JSON.parse(content));
+      let cleanedContent = content.trim();
+      if (cleanedContent.startsWith("```json")) {
+        cleanedContent = cleanedContent.replace(/^```json\s*/i, "");
+      } else if (cleanedContent.startsWith("```")) {
+        cleanedContent = cleanedContent.replace(/^```\s*/i, "");
+      }
+      if (cleanedContent.endsWith("```")) {
+        cleanedContent = cleanedContent.replace(/```\s*$/i, "");
+      }
+
+      return MealAnalysisResponseSchema.parse(JSON.parse(cleanedContent.trim()));
     } finally {
       clearTimeout(timeout);
     }

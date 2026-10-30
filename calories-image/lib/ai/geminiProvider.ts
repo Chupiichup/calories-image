@@ -102,7 +102,18 @@ Hãy trả về JSON theo schema:
         throw new Error("Không nhận được nội dung phân tích từ Gemini API.");
       }
 
-      const parsedData = JSON.parse(rawText);
+      // Clean potential markdown fences (e.g. ```json ... ```)
+      let cleanedText = rawText.trim();
+      if (cleanedText.startsWith("```json")) {
+        cleanedText = cleanedText.replace(/^```json\s*/i, "");
+      } else if (cleanedText.startsWith("```")) {
+        cleanedText = cleanedText.replace(/^```\s*/i, "");
+      }
+      if (cleanedText.endsWith("```")) {
+        cleanedText = cleanedText.replace(/```\s*$/i, "");
+      }
+
+      const parsedData = JSON.parse(cleanedText.trim());
       return MealAnalysisResponseSchema.parse(parsedData);
     } catch (err: any) {
       if (err.name === "AbortError") {
