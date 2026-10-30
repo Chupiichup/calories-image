@@ -3,6 +3,8 @@ import {
   repository,
   isValidUUID,
   getLocalDateString,
+  deduplicateMealList,
+  type StoredMeal,
 } from "./repository";
 
 describe("Database Repository & Calorie Tracking", () => {
@@ -87,6 +89,72 @@ describe("Database Repository & Calorie Tracking", () => {
     const dailyTarget = 2000;
     const remainingCalories = dailyTarget - totalCalories;
     expect(remainingCalories).toBe(1455);
+  });
+
+  it("deduplicateMealList identifies and filters duplicate meals created by runaway sync loops", () => {
+    const baseTime = "2026-10-30T17:07:00.000Z";
+    const duplicateMeal1: StoredMeal = {
+      id: "meal-dup-1",
+      userId: "user-123",
+      mealType: "lunch",
+      eatenAt: baseTime,
+      analysisStatus: "ai_confirmed",
+      createdAt: baseTime,
+      items: [
+        {
+          id: "item-1",
+          mealId: "meal-dup-1",
+          foodNameSnapshot: "Bí đỏ nhồi thịt hấp",
+          portionG: 350,
+          calories: 280,
+          protein: 18.5,
+          carbs: 22,
+          fat: 14,
+          fiber: 4,
+          nutritionSource: "AI Vision",
+          isAiEstimated: true,
+        },
+      ],
+    };
+
+    const duplicateMeal2: StoredMeal = {
+      ...duplicateMeal1,
+      id: "meal-dup-2",
+      eatenAt: "2026-10-30T17:07:05.000Z", // 5 seconds later
+      items: duplicateMeal1.items.map((it) => ({ ...it, id: "item-2", mealId: "meal-dup-2" })),
+    };
+
+    const differentMeal: StoredMeal = {
+      id: "meal-diff",
+      userId: "user-123",
+      mealType: "dinner",
+      eatenAt: "2026-10-30T19:30:00.000Z",
+      analysisStatus: "manual",
+      createdAt: "2026-10-30T19:30:00.000Z",
+      items: [
+        {
+          id: "item-diff",
+          mealId: "meal-diff",
+          foodNameSnapshot: "Salad ức gà",
+          portionG: 200,
+          calories: 250,
+          protein: 30,
+          carbs: 5,
+          fat: 8,
+          fiber: 3,
+          nutritionSource: "Thủ công",
+          isAiEstimated: false,
+        },
+      ],
+    };
+
+    const mealsWithDuplicates = [duplicateMeal1, duplicateMeal2, differentMeal];
+    const { unique, duplicateIds } = deduplicateMealList(mealsWithDuplicates);
+
+    expect(unique).toHaveLength(2);
+    expect(duplicateIds).toEqual(["meal-dup-2"]);
+    expect(unique.find((m) => m.id === "meal-dup-1")).toBeDefined();
+    expect(unique.find((m) => m.id === "meal-diff")).toBeDefined();
   });
 });
 

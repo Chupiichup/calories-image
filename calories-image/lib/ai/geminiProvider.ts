@@ -37,7 +37,7 @@ export class GeminiVisionProvider implements IAiVisionProvider {
     userNote?: string;
   }): Promise<MealAnalysisResult> {
     const cleanKey = this.apiKey;
-    const cleanBase64 = params.imageBase64.replace(/^data:[^;]+;base64,/, "").trim();
+    const cleanBase64 = params.imageBase64.replace(/^data:[^;]+;base64,/, "").replace(/\s+/g, "");
     // Gemini API only accepts 'image/jpeg', 'image/png', 'image/webp'
     const safeMime =
       params.mimeType === "image/png" || params.mimeType === "image/webp"
@@ -243,6 +243,45 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         }
 
         const parsedData = JSON.parse(cleanedText.trim());
+
+        // Pre-normalize parsedData so minor format deviations from Gemini don't throw Zod validation errors
+        if (parsedData && typeof parsedData === "object") {
+          const mType = String(parsedData.mealTypeInferred || "").toLowerCase();
+          if (mType.includes("break") || mType.includes("sáng")) parsedData.mealTypeInferred = "breakfast";
+          else if (mType.includes("lunch") || mType.includes("trưa")) parsedData.mealTypeInferred = "lunch";
+          else if (mType.includes("din") || mType.includes("tối")) parsedData.mealTypeInferred = "dinner";
+          else if (mType.includes("snack") || mType.includes("phụ")) parsedData.mealTypeInferred = "snack";
+          else parsedData.mealTypeInferred = "lunch";
+
+          let cOverall = Number(parsedData.confidenceOverall ?? 0.85);
+          if (cOverall > 1) cOverall = cOverall / 100;
+          parsedData.confidenceOverall = Math.max(0, Math.min(1, cOverall || 0.85));
+
+          if (Array.isArray(parsedData.candidates)) {
+            parsedData.candidates = parsedData.candidates.map((c: any) => {
+              const portion = Number(c.portionG || c.portion_g || c.portion || 150);
+              let conf = Number(c.confidence ?? 0.85);
+              if (conf > 1) conf = conf / 100;
+
+              return {
+                name: String(c.name || "Món ăn").trim(),
+                standardizedName: c.standardizedName ? String(c.standardizedName) : undefined,
+                portionG: Math.max(10, isNaN(portion) ? 100 : portion),
+                calories: Math.max(0, Number(c.calories ?? 0)),
+                protein: Math.max(0, Number(c.protein ?? 0)),
+                carbs: Math.max(0, Number(c.carbs ?? 0)),
+                fat: Math.max(0, Number(c.fat ?? 0)),
+                fiber: Math.max(0, Number(c.fiber ?? 0)),
+                confidence: Math.max(0, Math.min(1, conf || 0.85)),
+                preparationMethod: c.preparationMethod ? String(c.preparationMethod) : undefined,
+                ingredients: Array.isArray(c.ingredients) ? c.ingredients.map(String) : [],
+                notes: c.notes ? String(c.notes) : undefined,
+                uncertainties: Array.isArray(c.uncertainties) ? c.uncertainties.map(String) : [],
+              };
+            });
+          }
+        }
+
         return MealAnalysisResponseSchema.parse(parsedData);
       } catch (err: any) {
         lastError = err;

@@ -146,6 +146,70 @@ function setStorage<T>(key: string, val: T): void {
   memoryStore.set(key, val);
 }
 
+// Helper to deduplicate meals that share identical food/calories and meal type within a short time window
+export function deduplicateMealList(meals: StoredMeal[]): { unique: StoredMeal[]; duplicateIds: string[] } {
+  const unique: StoredMeal[] = [];
+  const duplicateIds: string[] = [];
+
+  for (const m of meals) {
+    const mTime = new Date(m.eatenAt).getTime();
+    const mDay = getLocalDateString(m.eatenAt);
+    const mTotalCal = Math.round(
+      (m.items || []).reduce((acc, it) => acc + (Number(it.calories) || 0), 0)
+    );
+    const mItemsSig = (m.items || [])
+      .map((it) => `${it.foodNameSnapshot || (it as any).name || ""}_${Math.round(it.portionG || 0)}_${Math.round(it.calories || 0)}`)
+      .sort()
+      .join("|");
+
+    const isDup = unique.some((existing) => {
+      if (existing.id === m.id) return true;
+
+      const existingDay = getLocalDateString(existing.eatenAt);
+      if (existingDay !== mDay) return false;
+
+      if (existing.mealType !== m.mealType) return false;
+
+      const existingTime = new Date(existing.eatenAt).getTime();
+      const timeDiffSec = Math.abs(mTime - existingTime) / 1000;
+
+      const existingTotalCal = Math.round(
+        (existing.items || []).reduce((acc, it) => acc + (Number(it.calories) || 0), 0)
+      );
+
+      const existingItemsSig = (existing.items || [])
+        .map((it) => `${it.foodNameSnapshot || (it as any).name || ""}_${Math.round(it.portionG || 0)}_${Math.round(it.calories || 0)}`)
+        .sort()
+        .join("|");
+
+      // Match 1: Identical items signature
+      if (mItemsSig.length > 0 && mItemsSig === existingItemsSig) {
+        return true;
+      }
+
+      // Match 2: Same calories (> 0) and recorded within 2 hours
+      if (mTotalCal > 0 && mTotalCal === existingTotalCal && timeDiffSec < 7200) {
+        return true;
+      }
+
+      // Match 3: Recorded within 60 seconds with same mealType
+      if (timeDiffSec < 60 && mTotalCal === existingTotalCal) {
+        return true;
+      }
+
+      return false;
+    });
+
+    if (isDup) {
+      duplicateIds.push(m.id);
+    } else {
+      unique.push(m);
+    }
+  }
+
+  return { unique, duplicateIds };
+}
+
 export const repository = {
   // 1. Profile & Goals
   async getProfile(): Promise<{ profile: StoredProfile; goal: StoredGoal }> {
@@ -295,9 +359,8 @@ export const repository = {
         }
 
         if (meals && !mealsErr) {
-          const localMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
-          return meals.map((m) => {
-            let mappedItems = (m.meal_items || []).map((it: any) => ({
+          const rawMapped: StoredMeal[] = meals.map((m) => {
+            const mappedItems = (m.meal_items || []).map((it: any) => ({
               id: it.id,
               mealId: it.meal_id,
               foodId: it.food_id,
@@ -313,33 +376,6 @@ export const repository = {
               confidence: it.confidence ? Number(it.confidence) : undefined,
             }));
 
-            // Fallback recovery: if meal_items is empty in DB (e.g. from previously failed UUID insert),
-            // recover full items and macros from local backup AND auto-repair in Supabase
-            if (mappedItems.length === 0) {
-              const matched = localMeals.find(
-                (lm) => lm.id === m.id || lm.eatenAt === m.eaten_at,
-              );
-              if (matched && matched.items && matched.items.length > 0) {
-                mappedItems = matched.items;
-                // Auto-repair in Supabase so other devices (e.g. laptop) get the items too!
-                const itemsToRepair = matched.items.map((it) => ({
-                  meal_id: m.id,
-                  food_id: isValidUUID(it.foodId) ? it.foodId : null,
-                  food_name_snapshot: it.foodNameSnapshot,
-                  portion_g: it.portionG,
-                  calories: it.calories,
-                  protein: it.protein,
-                  carbs: it.carbs,
-                  fat: it.fat,
-                  fiber: it.fiber,
-                  nutrition_source: it.nutritionSource,
-                  is_ai_estimated: it.isAiEstimated,
-                  confidence: it.confidence || null,
-                }));
-                supabase.from("meal_items").insert(itemsToRepair).then();
-              }
-            }
-
             return {
               id: m.id,
               userId: m.user_id,
@@ -351,16 +387,25 @@ export const repository = {
               items: mappedItems,
             };
           });
+
+          // Auto-deduplicate duplicate meals
+          const { unique: deduped, duplicateIds } = deduplicateMealList(rawMapped);
+          if (duplicateIds.length > 0) {
+            console.log(`Auto-cleaning ${duplicateIds.length} duplicate meals from Supabase...`);
+            supabase.from("meals").delete().in("id", duplicateIds).then();
+          }
+
+          setStorage("meals", deduped);
+          return deduped;
         }
       }
     }
 
     const allMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
     const cleaned = allMeals.filter((m) => m.id !== "meal-1" && m.id !== "meal-2");
-    if (cleaned.length !== allMeals.length) {
-      setStorage("meals", cleaned);
-    }
-    return cleaned.filter((m) => getLocalDateString(m.eatenAt) === dateString);
+    const { unique: deduped } = deduplicateMealList(cleaned);
+    setStorage("meals", deduped);
+    return deduped.filter((m) => getLocalDateString(m.eatenAt) === dateString);
   },
 
   async getAllMeals(): Promise<StoredMeal[]> {
@@ -382,9 +427,8 @@ export const repository = {
         }
 
         if (meals && !mealsErr) {
-          const localMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
-          return meals.map((m) => {
-            let mappedItems = (m.meal_items || []).map((it: any) => ({
+          const rawMapped: StoredMeal[] = meals.map((m) => {
+            const mappedItems = (m.meal_items || []).map((it: any) => ({
               id: it.id,
               mealId: it.meal_id,
               foodId: it.food_id,
@@ -400,31 +444,6 @@ export const repository = {
               confidence: it.confidence ? Number(it.confidence) : undefined,
             }));
 
-            if (mappedItems.length === 0) {
-              const matched = localMeals.find(
-                (lm) => lm.id === m.id || lm.eatenAt === m.eaten_at,
-              );
-              if (matched && matched.items && matched.items.length > 0) {
-                mappedItems = matched.items;
-                // Auto-repair in Supabase
-                const itemsToRepair = matched.items.map((it) => ({
-                  meal_id: m.id,
-                  food_id: isValidUUID(it.foodId) ? it.foodId : null,
-                  food_name_snapshot: it.foodNameSnapshot,
-                  portion_g: it.portionG,
-                  calories: it.calories,
-                  protein: it.protein,
-                  carbs: it.carbs,
-                  fat: it.fat,
-                  fiber: it.fiber,
-                  nutrition_source: it.nutritionSource,
-                  is_ai_estimated: it.isAiEstimated,
-                  confidence: it.confidence || null,
-                }));
-                supabase.from("meal_items").insert(itemsToRepair).then();
-              }
-            }
-
             return {
               id: m.id,
               userId: m.user_id,
@@ -436,16 +455,25 @@ export const repository = {
               items: mappedItems,
             };
           });
+
+          // Auto-deduplicate duplicate meals
+          const { unique: deduped, duplicateIds } = deduplicateMealList(rawMapped);
+          if (duplicateIds.length > 0) {
+            console.log(`Auto-cleaning ${duplicateIds.length} duplicate meals from Supabase...`);
+            supabase.from("meals").delete().in("id", duplicateIds).then();
+          }
+
+          setStorage("meals", deduped);
+          return deduped;
         }
       }
     }
 
     const allMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
     const cleaned = allMeals.filter((m) => m.id !== "meal-1" && m.id !== "meal-2");
-    if (cleaned.length !== allMeals.length) {
-      setStorage("meals", cleaned);
-    }
-    return cleaned;
+    const { unique: deduped } = deduplicateMealList(cleaned);
+    setStorage("meals", deduped);
+    return deduped;
   },
 
   async saveMeal(input: {
@@ -565,7 +593,7 @@ export const repository = {
     );
   },
 
-  // Auto-sync unsynced local meals and repair empty meal_items in Supabase
+  // Sync unsynced local meals to Supabase safely (manual trigger only, deduplicated)
   async syncLocalMealsToSupabase(): Promise<void> {
     const supabase = createClient();
     if (!supabase) return;
@@ -581,20 +609,36 @@ export const repository = {
       // 1. Fetch remote meals with their meal_items
       const { data: remoteMeals } = await supabase
         .from("meals")
-        .select("id, eaten_at, meal_items(id)")
+        .select("id, eaten_at, meal_type, meal_items(id, food_name_snapshot, calories)")
         .eq("user_id", user.id);
 
-      const remoteMealMap = new Map<string, { id: string; itemCount: number }>();
-      (remoteMeals || []).forEach((rm: any) => {
-        remoteMealMap.set(rm.eaten_at, {
-          id: rm.id,
-          itemCount: Array.isArray(rm.meal_items) ? rm.meal_items.length : 0,
-        });
-      });
+      if (!remoteMeals) return;
 
-      // 2. Iterate through local meals to repair or upload
-      for (const lm of localMeals) {
-        const existingRemote = remoteMealMap.get(lm.eatenAt);
+      // Deduplicate local meals first
+      const { unique: dedupedLocal } = deduplicateMealList(localMeals);
+      setStorage("meals", dedupedLocal);
+
+      // 2. Iterate through local meals to repair or upload without duplicating
+      for (const lm of dedupedLocal) {
+        const lmTime = new Date(lm.eatenAt).getTime();
+        const lmFingerprint = (lm.items || [])
+          .map((it) => `${it.foodNameSnapshot || (it as any).name || ""}_${Math.round(it.calories || 0)}`)
+          .sort()
+          .join("|");
+
+        const existingRemote = remoteMeals.find((rm: any) => {
+          if (rm.id === lm.id) return true;
+          const rmTime = new Date(rm.eaten_at).getTime();
+          const timeDiff = Math.abs(lmTime - rmTime) / 1000;
+          if (timeDiff < 30 && rm.meal_type === lm.mealType) return true;
+
+          const rmFingerprint = (rm.meal_items || [])
+            .map((it: any) => `${it.food_name_snapshot}_${Math.round(it.calories || 0)}`)
+            .sort()
+            .join("|");
+          if (rmFingerprint.length > 0 && rmFingerprint === lmFingerprint) return true;
+          return false;
+        });
 
         if (!existingRemote) {
           // Meal does not exist in Supabase at all - upload it!
@@ -627,23 +671,6 @@ export const repository = {
             }));
             await supabase.from("meal_items").insert(itemsToInsert);
           }
-        } else if (existingRemote.itemCount === 0 && lm.items && lm.items.length > 0) {
-          // Meal exists in Supabase, but meal_items was empty (repair it!)
-          const itemsToInsert = lm.items.map((it) => ({
-            meal_id: existingRemote.id,
-            food_id: isValidUUID(it.foodId) ? it.foodId : null,
-            food_name_snapshot: it.foodNameSnapshot,
-            portion_g: it.portionG,
-            calories: it.calories,
-            protein: it.protein,
-            carbs: it.carbs,
-            fat: it.fat,
-            fiber: it.fiber,
-            nutrition_source: it.nutritionSource,
-            is_ai_estimated: it.isAiEstimated,
-            confidence: it.confidence || null,
-          }));
-          await supabase.from("meal_items").insert(itemsToInsert);
         }
       }
     } catch (err) {

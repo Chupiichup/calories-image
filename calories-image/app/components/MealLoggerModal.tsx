@@ -135,7 +135,12 @@ export function MealLoggerModal({
 
   // Run AI Vision Analysis Endpoint
   const handleAnalyzePhoto = async () => {
-    if (!selectedImageFile && !selectedImage) {
+    let base64Data = "";
+    if (selectedImage) {
+      base64Data = selectedImage.includes(",") ? selectedImage.split(",")[1] : selectedImage;
+    }
+
+    if (!selectedImageFile && !base64Data) {
       setAnalysisError("Vui lòng chụp hoặc tải ảnh bữa ăn trước.");
       return;
     }
@@ -156,7 +161,6 @@ export function MealLoggerModal({
           body: formData,
         });
       } else {
-        const base64Data = selectedImage!.split(",")[1];
         res = await fetch("/api/ai/analyze-meal", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -496,6 +500,9 @@ export function MealLoggerModal({
                   accept="image/*"
                   capture="environment"
                   className="hidden"
+                  onClick={(e) => {
+                    (e.target as HTMLInputElement).value = "";
+                  }}
                   onChange={handleImageChange}
                 />
 
@@ -505,6 +512,9 @@ export function MealLoggerModal({
                   type="file"
                   accept="image/*"
                   className="hidden"
+                  onClick={(e) => {
+                    (e.target as HTMLInputElement).value = "";
+                  }}
                   onChange={handleImageChange}
                 />
               </div>

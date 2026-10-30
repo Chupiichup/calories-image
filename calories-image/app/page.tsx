@@ -85,11 +85,11 @@ export default function Home() {
     };
   }, []);
 
-  // Auto-refresh when tab is focused or becomes visible (cross-device sync)
+  // Auto-refresh when tab is focused or becomes visible (silent cross-device sync)
   useEffect(() => {
     const handleVisibilityOrFocus = () => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        loadData();
+        loadData(undefined, false);
       }
     };
 
@@ -102,45 +102,47 @@ export default function Home() {
     };
   }, [selectedDate]);
 
-  // Realtime subscription for cross-device updates
+  // Realtime subscription for cross-device updates (debounced & silent)
   useEffect(() => {
     const supabase = createClient();
     if (!supabase || !currentUser) return;
+
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const triggerSilentReload = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        loadData(undefined, false);
+      }, 1000);
+    };
 
     const channel = supabase
       .channel("cross-device-sync")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "meals" },
-        () => {
-          loadData();
-        },
+        triggerSilentReload,
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "meal_items" },
-        () => {
-          loadData();
-        },
+        triggerSilentReload,
       )
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
   }, [currentUser, selectedDate]);
 
   // Load data whenever selectedDate changes
-  const loadData = async (dateForDiary?: string) => {
+  const loadData = async (dateForDiary?: string, showLoading = true) => {
     try {
-      setIsLoading(true);
+      if (showLoading) {
+        setIsLoading(true);
+      }
       const isSupabaseActive = isSupabaseConfigured();
       setIsDemoMode(!isSupabaseActive);
-
-      // Perform background sync of any unsynced local meals or repaired items
-      if (isSupabaseActive) {
-        await repository.syncLocalMealsToSupabase().catch(() => {});
-      }
 
       const todayStr = getLocalDateString();
       const targetDiaryDate = dateForDiary || selectedDate || todayStr;
@@ -169,7 +171,9 @@ export default function Home() {
     } catch (err) {
       console.error("Error loading nutrition coach data:", err);
     } finally {
-      setIsLoading(false);
+      if (showLoading) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -184,7 +188,9 @@ export default function Home() {
     setIsSyncing(true);
     try {
       await repository.syncLocalMealsToSupabase();
-      await loadData();
+      await loadData(undefined, false);
+    } catch (err) {
+      console.error("Manual sync error:", err);
     } finally {
       setIsSyncing(false);
     }
