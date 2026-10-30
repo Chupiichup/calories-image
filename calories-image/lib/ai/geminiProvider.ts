@@ -246,7 +246,7 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
         lastError = err;
         console.warn(`Attempt with ${attempt.version}/${attempt.shortName} failed: ${err.message}`);
         
-        // If 404, 429 quota limit, or timeout/abort for this specific model, continue to next candidate!
+        // If 404, 429 quota limit, 503 high demand, 500/502/504 server error, or timeout/abort, continue to next candidate!
         if (
           err.message &&
           (err.message.includes("404") ||
@@ -254,10 +254,24 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
             err.message.includes("429") ||
             err.message.includes("quota") ||
             err.message.includes("RESOURCE_EXHAUSTED") ||
+            err.message.includes("503") ||
+            err.message.includes("500") ||
+            err.message.includes("502") ||
+            err.message.includes("504") ||
+            err.message.includes("UNAVAILABLE") ||
+            err.message.includes("high demand") ||
             err.message.includes("aborted") ||
             err.message.includes("abort") ||
             err.message.includes("timeout"))
         ) {
+          // If 503 high demand or 500, pause briefly (600ms) before trying the next model
+          if (
+            err.message.includes("503") ||
+            err.message.includes("UNAVAILABLE") ||
+            err.message.includes("high demand")
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 600));
+          }
           continue;
         }
         // If it's a fatal error like 400 or 403, break out and throw
@@ -265,6 +279,17 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
       } finally {
         clearTimeout(timeout);
       }
+    }
+
+    if (
+      lastError?.message &&
+      (lastError.message.includes("503") ||
+        lastError.message.includes("UNAVAILABLE") ||
+        lastError.message.includes("high demand"))
+    ) {
+      throw new Error(
+        "Máy chủ Google Gemini hiện đang quá tải lượt truy cập tạm thời (mã 503: High demand). Vui lòng bấm 'Phân tích bằng AI' lại sau 5-10 giây hoặc chọn '+ Nhập thủ công'."
+      );
     }
 
     if (lastError?.message && (lastError.message.includes("429") || lastError.message.includes("RESOURCE_EXHAUSTED"))) {
