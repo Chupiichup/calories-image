@@ -2,7 +2,12 @@
 
 import React from "react";
 import { History, Calendar, Flame, Dumbbell, Wheat, Droplet, Sparkles } from "lucide-react";
-import type { StoredMeal, StoredGoal } from "@/lib/db/repository";
+import {
+  getLocalDateString,
+  deduplicateMealList,
+  type StoredMeal,
+  type StoredGoal,
+} from "@/lib/db/repository";
 import { round } from "@/lib/nutrition";
 
 interface HistoryTabProps {
@@ -11,23 +16,26 @@ interface HistoryTabProps {
 }
 
 export function HistoryTab({ meals, goal }: HistoryTabProps) {
-  // Group meals by date (YYYY-MM-DD)
+  // Deduplicate any repeated meals across history
+  const { unique: dedupedMeals } = deduplicateMealList(meals);
+
+  // Group meals by LOCAL date (YYYY-MM-DD)
   const daysMap: Record<
     string,
     { date: string; calories: number; protein: number; carbs: number; fat: number; fiber: number }
   > = {};
 
-  meals.forEach((m) => {
-    const d = m.eatenAt.split("T")[0];
+  dedupedMeals.forEach((m) => {
+    const d = getLocalDateString(m.eatenAt);
     if (!daysMap[d]) {
       daysMap[d] = { date: d, calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 };
     }
-    m.items.forEach((it) => {
-      daysMap[d].calories += it.calories;
-      daysMap[d].protein += it.protein;
-      daysMap[d].carbs += it.carbs;
-      daysMap[d].fat += it.fat;
-      daysMap[d].fiber += it.fiber;
+    (m.items || []).forEach((it) => {
+      daysMap[d].calories += Number(it.calories) || 0;
+      daysMap[d].protein += Number(it.protein) || 0;
+      daysMap[d].carbs += Number(it.carbs) || 0;
+      daysMap[d].fat += Number(it.fat) || 0;
+      daysMap[d].fiber += Number(it.fiber) || 0;
     });
   });
 
@@ -118,7 +126,7 @@ export function HistoryTab({ meals, goal }: HistoryTabProps) {
                   return (
                     <tr key={d.date} className="hover:bg-stone-50 transition">
                       <td className="py-3 font-medium text-stone-800">
-                        {new Date(d.date).toLocaleDateString("vi-VN", {
+                        {new Date(`${d.date}T00:00:00`).toLocaleDateString("vi-VN", {
                           weekday: "short",
                           day: "2-digit",
                           month: "2-digit",

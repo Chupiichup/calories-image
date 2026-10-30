@@ -56,6 +56,24 @@ export function ProfileTab({
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
+  // Sync form inputs if parent profile/goal props update
+  React.useEffect(() => {
+    if (profile) {
+      setAge(profile.ageYears);
+      setHeight(profile.heightCm);
+      setSex(profile.sexForBmr);
+      setActivity(profile.activityLevel);
+    }
+  }, [profile]);
+
+  React.useEffect(() => {
+    if (goal) {
+      setCurrentWeight(goal.currentWeightKg);
+      setGoalWeight(goal.goalWeightKg);
+      setPace(goal.weightLossPace);
+    }
+  }, [goal]);
+
   // Compute live deterministic preview of targets
   const calculated = calculateComprehensiveTargets(
     {

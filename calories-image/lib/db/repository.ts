@@ -235,36 +235,49 @@ export const repository = {
           .single();
 
         if (profile && goal) {
-          return {
-            profile: {
-              id: profile.id,
-              email: user.email,
-              dateOfBirth: profile.date_of_birth,
-              ageYears: profile.date_of_birth
-                ? Math.floor(
-                    (Date.now() - new Date(profile.date_of_birth).getTime()) /
-                      (365.25 * 24 * 60 * 60 * 1000),
-                  )
-                : 28,
-              heightCm: Number(profile.height_cm),
-              sexForBmr: profile.sex_for_bmr,
-              activityLevel: profile.activity_level,
-              updatedAt: profile.updated_at,
-            },
-            goal: {
-              id: goal.id,
-              userId: goal.user_id,
-              currentWeightKg: Number(goal.current_weight_kg),
-              goalWeightKg: Number(goal.goal_weight_kg),
-              dailyCalorieTarget: Number(goal.daily_calorie_target),
-              dailyProteinTargetG: Number(goal.daily_protein_target_g),
-              dailyCarbTargetG: Number(goal.daily_carbohydrate_target_g),
-              dailyFatTargetG: Number(goal.daily_fat_target_g),
-              dailyFiberTargetG: Number(goal.daily_fiber_target_g),
-              weightLossPace: goal.weight_loss_pace,
-              updatedAt: goal.updated_at,
-            },
+          let ageYears = 28;
+          if (profile.date_of_birth) {
+            const dob = new Date(profile.date_of_birth);
+            if (!isNaN(dob.getTime())) {
+              ageYears = Math.floor(
+                (Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000),
+              );
+            }
+          } else {
+            const localP = getStorage<StoredProfile>("profile", DEFAULT_PROFILE);
+            if (localP && localP.ageYears) {
+              ageYears = localP.ageYears;
+            }
+          }
+
+          const resolvedProfile: StoredProfile = {
+            id: profile.id,
+            email: user.email,
+            dateOfBirth: profile.date_of_birth,
+            ageYears,
+            heightCm: Number(profile.height_cm),
+            sexForBmr: profile.sex_for_bmr,
+            activityLevel: profile.activity_level,
+            updatedAt: profile.updated_at,
           };
+          const resolvedGoal: StoredGoal = {
+            id: goal.id,
+            userId: goal.user_id,
+            currentWeightKg: Number(goal.current_weight_kg),
+            goalWeightKg: Number(goal.goal_weight_kg),
+            dailyCalorieTarget: Number(goal.daily_calorie_target),
+            dailyProteinTargetG: Number(goal.daily_protein_target_g),
+            dailyCarbTargetG: Number(goal.daily_carbohydrate_target_g),
+            dailyFatTargetG: Number(goal.daily_fat_target_g),
+            dailyFiberTargetG: Number(goal.daily_fiber_target_g),
+            weightLossPace: goal.weight_loss_pace,
+            updatedAt: goal.updated_at,
+          };
+
+          setStorage("profile", resolvedProfile);
+          setStorage("goal", resolvedGoal);
+
+          return { profile: resolvedProfile, goal: resolvedGoal };
         }
       }
     }
@@ -286,8 +299,13 @@ export const repository = {
       } = await supabase.auth.getUser();
 
       if (user) {
+        // Calculate date_of_birth from ageYears
+        const birthYear = new Date().getFullYear() - (profileInput.ageYears || 28);
+        const calculatedDob = `${birthYear}-01-01`;
+
         await supabase.from("profiles").upsert({
           id: user.id,
+          date_of_birth: profileInput.dateOfBirth || calculatedDob,
           height_cm: profileInput.heightCm,
           sex_for_bmr: profileInput.sexForBmr,
           activity_level: profileInput.activityLevel,
