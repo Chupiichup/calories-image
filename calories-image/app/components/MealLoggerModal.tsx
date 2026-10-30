@@ -114,7 +114,8 @@ export function MealLoggerModal({
 
   // Manual Food Search state
   const [searchQuery, setSearchQuery] = useState("");
-  const [isSearching, setIsSearching] = useState(false);
+  const [isSearching, setIsSearching] = useState(initialMode === "manual");
+  const [editingNutritionItemId, setEditingNutritionItemId] = useState<string | null>(null);
 
   // Metabolic tracking context
   const [metabolicPrefs, setMetabolicPrefs] = useState<MetabolicPreferences>(DEFAULT_METABOLIC_PREFERENCES);
@@ -124,6 +125,9 @@ export function MealLoggerModal({
 
   React.useEffect(() => {
     if (isOpen) {
+      if (initialMode === "manual") {
+        setIsSearching(true);
+      }
       repository.getMetabolicPreferences().then((p) => {
         if (p) setMetabolicPrefs(p);
       });
@@ -500,6 +504,75 @@ export function MealLoggerModal({
     setSearchQuery("");
   };
 
+  // Add quick custom food when not found in catalog or by user preference
+  const handleAddCustomFood = (customName: string) => {
+    const trimmed = customName.trim();
+    if (!trimmed) return;
+    const defaultG = 100;
+    const baseNutrition: NutritionValues = {
+      calories: 100,
+      protein: 5,
+      carbs: 10,
+      fat: 3,
+      fiber: 1,
+    };
+    const metabolic = resolveItemMetabolicDetails({
+      foodName: trimmed,
+      portionG: defaultG,
+      carbsG: baseNutrition.carbs,
+    });
+
+    const newItem: EditableItem = {
+      id: `custom-${Date.now()}`,
+      foodName: trimmed,
+      portionG: defaultG,
+      baseNutritionPer100g: baseNutrition,
+      nutrition: { ...baseNutrition },
+      isAiEstimated: false,
+      sugarClassification: metabolic.sugarClassification,
+      addedSugarG: metabolic.addedSugarG,
+      totalSugarG: metabolic.totalSugarG,
+      giValue: metabolic.giValue,
+      giCategory: metabolic.giCategory,
+      glValue: metabolic.glValue,
+      glCategory: metabolic.glCategory,
+      notes: "Món người dùng tự thêm tùy chỉnh",
+    };
+
+    setItems((prev) => [...prev, newItem]);
+    setIsSearching(false);
+    setSearchQuery("");
+  };
+
+  // Direct editing of calories, protein, carbs, fat for fine-tuning
+  const handleDirectNutritionChange = (
+    itemId: string,
+    field: "calories" | "protein" | "carbs" | "fat",
+    val: number,
+  ) => {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== itemId) return it;
+        const clamped = Math.max(0, val);
+        const updatedNutrition = {
+          ...it.nutrition,
+          [field]: clamped,
+        };
+        const portion = typeof it.portionG === "number" && it.portionG > 0 ? it.portionG : 100;
+        const ratio = 100 / portion;
+        const updatedBase = {
+          ...it.baseNutritionPer100g,
+          [field]: round(clamped * ratio, 1),
+        };
+        return {
+          ...it,
+          nutrition: updatedNutrition,
+          baseNutritionPer100g: updatedBase,
+        };
+      }),
+    );
+  };
+
   // Calculate totals
   const totalCals = items.reduce((sum, it) => sum + (it.nutrition?.calories || 0), 0);
   const totalProtein = items.reduce((sum, it) => sum + (it.nutrition?.protein || 0), 0);
@@ -596,7 +669,10 @@ export function MealLoggerModal({
               <span>Chụp ảnh AI</span>
             </button>
             <button
-              onClick={() => setMode("manual")}
+              onClick={() => {
+                setMode("manual");
+                setIsSearching(true);
+              }}
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                 mode === "manual" ? "bg-white text-emerald-700 shadow-sm" : "text-stone-600 hover:text-stone-900"
               }`}
@@ -889,30 +965,59 @@ export function MealLoggerModal({
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Tìm món Việt (Phở, ức gà, cơm, rau muống...)"
-                    className="w-full rounded-xl border border-stone-200 bg-white py-2 pl-9 pr-3 text-xs focus:border-emerald-500 focus:outline-none"
+                    placeholder="Tìm món Việt (Cà phê không đường, phở bò, ức gà, bún chả, cơm tấm...)"
+                    className="w-full rounded-xl border border-stone-200 bg-white py-2 pl-9 pr-8 text-xs focus:border-emerald-500 focus:outline-none shadow-sm"
                     autoFocus
                   />
-                </div>
-                <div className="max-h-48 overflow-y-auto divide-y divide-stone-200/60 rounded-xl bg-white border border-stone-200">
-                  {filteredFoods.slice(0, 8).map((f) => (
+                  {searchQuery && (
                     <button
-                      key={f.id}
-                      onClick={() => handleAddCatalogFood(f)}
-                      className="flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-emerald-50 transition"
+                      type="button"
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-3 top-2.5 text-stone-400 hover:text-stone-700 text-xs font-bold"
                     >
-                      <div>
-                        <span className="font-semibold text-stone-900">{f.name}</span>
-                        <span className="ml-2 text-[10px] text-stone-500">
-                          {f.caloriesPer100g} kcal / 100g
-                        </span>
-                      </div>
-                      <span className="font-semibold text-emerald-600">
-                        +{f.defaultPortionG}g
-                      </span>
+                      ✕
                     </button>
-                  ))}
+                  )}
                 </div>
+
+                <div className="max-h-60 overflow-y-auto divide-y divide-stone-200/60 rounded-xl bg-white border border-stone-200 shadow-inner">
+                  {filteredFoods.length > 0 ? (
+                    filteredFoods.slice(0, 20).map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => handleAddCatalogFood(f)}
+                        className="flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-emerald-50 transition"
+                      >
+                        <div className="pr-2">
+                          <span className="font-semibold text-stone-900">{f.name}</span>
+                          <span className="ml-2 text-[10px] text-stone-500">
+                            {f.caloriesPer100g} kcal / 100g • {f.proteinPer100g}g P
+                          </span>
+                        </div>
+                        <span className="shrink-0 font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded text-[11px] border border-emerald-200">
+                          +{f.defaultPortionG}g
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="p-3 text-center text-xs text-stone-500">
+                      Không tìm thấy &quot;{searchQuery}&quot; trong danh mục có sẵn.
+                    </div>
+                  )}
+                </div>
+
+                {/* Instant fallback: Quick add custom food */}
+                {searchQuery.trim().length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleAddCustomFood(searchQuery.trim())}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-emerald-500/50 bg-emerald-50/70 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition active:scale-[0.99]"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>+ Thêm nhanh món tùy chỉnh &quot;{searchQuery.trim()}&quot;</span>
+                  </button>
+                )}
               </div>
             )}
 
@@ -963,9 +1068,19 @@ export function MealLoggerModal({
                           <span className="text-xs text-stone-500">g</span>
                         </div>
 
-                        <div className="text-right min-w-[70px]">
+                        <div className="text-right min-w-[75px]">
                           <span className="text-xs font-bold text-stone-900">{round(it.nutrition.calories, 0)} kcal</span>
-                          <p className="text-[10px] text-emerald-600">{round(it.nutrition.protein, 1)}g P</p>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span className="text-[10px] text-emerald-600 font-semibold">{round(it.nutrition.protein, 1)}g P</span>
+                            <button
+                              type="button"
+                              onClick={() => setEditingNutritionItemId(editingNutritionItemId === it.id ? null : it.id)}
+                              className="text-[10px] text-stone-400 hover:text-emerald-700 underline"
+                              title="Tùy chỉnh calo, đạm, carb, béo"
+                            >
+                              {editingNutritionItemId === it.id ? "Đóng" : "Sửa calo"}
+                            </button>
+                          </div>
                         </div>
 
                         <button
@@ -976,6 +1091,55 @@ export function MealLoggerModal({
                         </button>
                       </div>
                     </div>
+
+                    {/* Direct Nutrition & Macro Fine-Tuning */}
+                    {editingNutritionItemId === it.id && (
+                      <div className="rounded-xl bg-stone-50 p-2.5 border border-stone-200 grid grid-cols-4 gap-2 text-center text-[10px]">
+                        <div>
+                          <label className="text-stone-500 block mb-0.5">Calo (kcal)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={Math.round(it.nutrition.calories)}
+                            onChange={(e) => handleDirectNutritionChange(it.id, "calories", Number(e.target.value))}
+                            className="w-full rounded border border-stone-300 py-1 px-1 text-center font-bold text-stone-900 focus:border-emerald-500 focus:outline-none bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-emerald-700 block mb-0.5 font-semibold">Đạm (g)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={it.nutrition.protein}
+                            onChange={(e) => handleDirectNutritionChange(it.id, "protein", Number(e.target.value))}
+                            className="w-full rounded border border-stone-300 py-1 px-1 text-center font-bold text-emerald-700 focus:border-emerald-500 focus:outline-none bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-amber-700 block mb-0.5 font-semibold">Carb (g)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={it.nutrition.carbs}
+                            onChange={(e) => handleDirectNutritionChange(it.id, "carbs", Number(e.target.value))}
+                            className="w-full rounded border border-stone-300 py-1 px-1 text-center font-bold text-amber-700 focus:border-emerald-500 focus:outline-none bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-rose-700 block mb-0.5 font-semibold">Béo (g)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={it.nutrition.fat}
+                            onChange={(e) => handleDirectNutritionChange(it.id, "fat", Number(e.target.value))}
+                            className="w-full rounded border border-stone-300 py-1 px-1 text-center font-bold text-rose-700 focus:border-emerald-500 focus:outline-none bg-white"
+                          />
+                        </div>
+                      </div>
+                    )}
 
                     {/* Metabolic Indicators & Clarification row */}
                     {metabolicPrefs.enabled && (
