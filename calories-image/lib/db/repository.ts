@@ -710,6 +710,41 @@ export const repository = {
     return updated;
   },
 
+  async mergeMealsToDate(sourceDate: string, targetDate: string): Promise<number> {
+    const supabase = createClient();
+    const currentMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
+    const updatedMeals: StoredMeal[] = [];
+    let movedCount = 0;
+
+    for (const meal of currentMeals) {
+      const mealDate = getLocalDateString(meal.eatenAt);
+      if (mealDate === sourceDate) {
+        movedCount++;
+        const vnTime = formatToVietnamDateTimeLocal(new Date(meal.eatenAt));
+        const timePart = vnTime.split("T")[1] || "12:00";
+        const newIso = vietnamDateTimeLocalToIso(`${targetDate}T${timePart}`);
+
+        if (supabase) {
+          try {
+            await supabase.from("meals").update({ eaten_at: newIso }).eq("id", meal.id);
+          } catch (e) {
+            console.warn("Error updating meal date in Supabase:", e);
+          }
+        }
+
+        updatedMeals.push({
+          ...meal,
+          eatenAt: newIso,
+        });
+      } else {
+        updatedMeals.push(meal);
+      }
+    }
+
+    setStorage("meals", updatedMeals);
+    return movedCount;
+  },
+
   // Sync unsynced local meals to Supabase safely (manual trigger only, deduplicated)
   async syncLocalMealsToSupabase(): Promise<void> {
     const supabase = createClient();

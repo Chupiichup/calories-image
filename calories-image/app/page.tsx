@@ -223,6 +223,19 @@ export default function Home() {
     await loadData(selectedDate);
   };
 
+  // Handler: Merge meals from one day to another
+  const handleMergeMeals = async (sourceDate: string, targetDate: string) => {
+    await repository.mergeMealsToDate(sourceDate, targetDate);
+    setSelectedDate(targetDate);
+    await loadData(targetDate);
+  };
+
+  // Handler: Select Date from History to open Diary
+  const handleSelectDateForDiary = (date: string) => {
+    setSelectedDate(date);
+    setCurrentTab("diary");
+  };
+
   // Handler: Delete Meal
   const handleDeleteMeal = async (mealId: string) => {
     await repository.deleteMeal(mealId);
@@ -323,7 +336,12 @@ export default function Home() {
         )}
 
         {currentTab === "history" && (
-          <HistoryTab meals={allMeals} goal={goal} />
+          <HistoryTab
+            meals={allMeals}
+            goal={goal}
+            onMergeMeals={handleMergeMeals}
+            onSelectDateForDiary={handleSelectDateForDiary}
+          />
         )}
 
         {currentTab === "weight" && (

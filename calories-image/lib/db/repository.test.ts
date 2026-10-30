@@ -260,6 +260,39 @@ describe("Database Repository & Calorie Tracking", () => {
     expect(history.some((w) => w.id === entry.id)).toBe(false);
   });
 
+  it("merges all meals from one date into another date accurately", async () => {
+    // Create two meals on Oct 31
+    await repository.saveMeal({
+      mealType: "lunch",
+      eatenAt: "2026-10-30T17:15:00.000Z", // 00:15 Oct 31 VN time
+      notes: "Bữa trưa thử nghiệm",
+      analysisStatus: "manual",
+      items: [{ foodName: "Cơm tấm", portionG: 200, nutrition: { calories: 300, protein: 10, carbs: 50, fat: 5, fiber: 1 } }],
+    });
+    await repository.saveMeal({
+      mealType: "dinner",
+      eatenAt: "2026-10-30T18:30:00.000Z", // 01:30 Oct 31 VN time
+      notes: "Bữa tối thử nghiệm",
+      analysisStatus: "manual",
+      items: [{ foodName: "Bún chả", portionG: 250, nutrition: { calories: 400, protein: 20, carbs: 50, fat: 10, fiber: 2 } }],
+    });
+
+    const oct31Before = await repository.getMealsForDate("2026-10-31");
+    expect(oct31Before.length).toBeGreaterThanOrEqual(2);
+
+    // Merge all meals from Oct 31 to Oct 30
+    const count = await repository.mergeMealsToDate("2026-10-31", "2026-10-30");
+    expect(count).toBeGreaterThanOrEqual(2);
+
+    // Oct 31 should now have 0 meals!
+    const oct31After = await repository.getMealsForDate("2026-10-31");
+    expect(oct31After).toHaveLength(0);
+
+    // Oct 30 should now contain all of them!
+    const oct30After = await repository.getMealsForDate("2026-10-30");
+    expect(oct30After.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("exports all user data as valid JSON", async () => {
     const exportedJson = await repository.exportAllData();
     expect(typeof exportedJson).toBe("string");
