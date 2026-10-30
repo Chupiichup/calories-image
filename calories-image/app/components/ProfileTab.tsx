@@ -17,8 +17,18 @@ import {
   Calendar,
   ArrowRight,
   TrendingDown,
+  Activity,
+  HeartPulse,
+  Candy,
+  Timer,
+  Sliders,
 } from "lucide-react";
-import type { StoredProfile, StoredGoal } from "@/lib/db/repository";
+import { repository, type StoredProfile, type StoredGoal } from "@/lib/db/repository";
+import {
+  type MetabolicPreferences,
+  DEFAULT_METABOLIC_PREFERENCES,
+  type StrictnessLevel,
+} from "@/lib/metabolic";
 import {
   calculateComprehensiveTargets,
   ACTIVITY_MULTIPLIER,
@@ -67,6 +77,13 @@ export function ProfileTab({
   const [isSpecialPregnant, setIsSpecialPregnant] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [metabolicPrefs, setMetabolicPrefs] = useState<MetabolicPreferences>(DEFAULT_METABOLIC_PREFERENCES);
+
+  React.useEffect(() => {
+    repository.getMetabolicPreferences().then((res) => {
+      if (res) setMetabolicPrefs(res);
+    });
+  }, []);
 
   // Sync form inputs if parent profile/goal props update
   React.useEffect(() => {
@@ -157,6 +174,7 @@ export function ProfileTab({
           targetDate: calculated.timeline.estimatedCompletionDate,
         },
       );
+      await repository.saveMetabolicPreferences(metabolicPrefs);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
     } finally {
@@ -674,6 +692,315 @@ export function ProfileTab({
               />
               <span>Đang mang thai hoặc cho con bú</span>
             </label>
+          </div>
+
+          {/* METABOLIC HEALTH & DIETARY PREFERENCES SECTION */}
+          <div className="rounded-3xl border border-teal-200/80 bg-gradient-to-br from-teal-50/50 via-white to-emerald-50/30 p-5 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-teal-100 pb-3">
+              <div className="flex items-start gap-2.5">
+                <div className="p-2 rounded-2xl bg-teal-600 text-white shadow-sm mt-0.5">
+                  <Activity className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-stone-900">
+                      Định hướng Sức khỏe Chuyển hóa & Đường/GI
+                    </h3>
+                    <span className="rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-bold text-teal-800">
+                      Tùy chỉnh cá nhân hóa
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-stone-500 mt-0.5 leading-relaxed">
+                    Hỗ trợ kiểm soát Gan nhiễm mỡ (MASLD), Kháng Insulin, Đường bổ sung và Nhịp ăn uống. Không thay thế phác đồ y khoa.
+                  </p>
+                </div>
+              </div>
+
+              {/* Master Switch Toggle */}
+              <label className="flex items-center gap-2 cursor-pointer self-start sm:self-auto shrink-0">
+                <span className="text-xs font-semibold text-stone-700">
+                  {metabolicPrefs.metabolicMonitoringEnabled ? "Đang bật" : "Đã tắt"}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={metabolicPrefs.metabolicMonitoringEnabled}
+                  onChange={(e) =>
+                    setMetabolicPrefs((prev) => ({
+                      ...prev,
+                      metabolicMonitoringEnabled: e.target.checked,
+                    }))
+                  }
+                  className="rounded text-teal-600 focus:ring-teal-500 h-4 w-4"
+                />
+              </label>
+            </div>
+
+            {metabolicPrefs.metabolicMonitoringEnabled && (
+              <div className="space-y-4 pt-1">
+                {/* 1. Strictness Mode Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                    <Sliders className="h-3.5 w-3.5 text-teal-600" />
+                    <span>Mức độ cảnh báo (Strictness Mode):</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {[
+                      {
+                        id: "gentle" as StrictnessLevel,
+                        label: "🍃 Nhẹ nhàng",
+                        desc: "Chỉ cảnh báo khi tổng đường vượt mục tiêu hoặc GL bữa ăn quá cao.",
+                      },
+                      {
+                        id: "balanced" as StrictnessLevel,
+                        label: "⚖️ Cân bằng (Khuyên dùng)",
+                        desc: "Nhắc nhở cân đối trước khi lưu, kèm gợi ý thực phẩm thay thế lành mạnh.",
+                      },
+                      {
+                        id: "strict" as StrictnessLevel,
+                        label: "🎯 Nghiêm ngặt",
+                        desc: "Theo dõi sát sao mọi món có đường bổ sung và khoảng cách bữa ăn.",
+                      },
+                    ].map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() =>
+                          setMetabolicPrefs((prev) => ({
+                            ...prev,
+                            strictness: mode.id,
+                          }))
+                        }
+                        className={`rounded-2xl p-2.5 text-left border transition ${
+                          metabolicPrefs.strictness === mode.id
+                            ? "bg-teal-700 text-white border-teal-700 shadow-sm"
+                            : "bg-white text-stone-700 border-stone-200 hover:bg-stone-50"
+                        }`}
+                      >
+                        <p className="text-xs font-bold">{mode.label}</p>
+                        <p
+                          className={`text-[10px] mt-1 line-clamp-2 ${
+                            metabolicPrefs.strictness === mode.id ? "text-teal-100" : "text-stone-500"
+                          }`}
+                        >
+                          {mode.desc}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 2. Specific Metabolic Considerations */}
+                <div className="space-y-2 pt-1 border-t border-teal-100/70">
+                  <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                    <HeartPulse className="h-3.5 w-3.5 text-teal-600" />
+                    <span>Định hướng sức khỏe cần ưu tiên:</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-white border border-stone-200 cursor-pointer hover:border-teal-300 transition">
+                      <input
+                        type="checkbox"
+                        checked={metabolicPrefs.fattyLiverConsideration}
+                        onChange={(e) =>
+                          setMetabolicPrefs((prev) => ({
+                            ...prev,
+                            fattyLiverConsideration: e.target.checked,
+                          }))
+                        }
+                        className="rounded text-teal-600 focus:ring-teal-500 mt-0.5"
+                      />
+                      <div>
+                        <span className="text-xs font-bold text-stone-900 block">
+                          Gan nhiễm mỡ (MASLD)
+                        </span>
+                        <span className="text-[10px] text-stone-500 block leading-tight mt-0.5">
+                          Tập trung hạn chế đường bổ sung, siro bắp HFCS và fructose tự do dạng lỏng.
+                        </span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-white border border-stone-200 cursor-pointer hover:border-teal-300 transition">
+                      <input
+                        type="checkbox"
+                        checked={metabolicPrefs.highInsulinConsideration}
+                        onChange={(e) =>
+                          setMetabolicPrefs((prev) => ({
+                            ...prev,
+                            highInsulinConsideration: e.target.checked,
+                          }))
+                        }
+                        className="rounded text-teal-600 focus:ring-teal-500 mt-0.5"
+                      />
+                      <div>
+                        <span className="text-xs font-bold text-stone-900 block">
+                          Kháng Insulin / Insulin cao
+                        </span>
+                        <span className="text-[10px] text-stone-500 block leading-tight mt-0.5">
+                          Tập trung kiểm soát tinh bột hấp thu nhanh (GI cao) và tải lượng đường huyết (GL).
+                        </span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* 3. Added Sugar Target */}
+                <div className="rounded-2xl bg-white p-3 border border-stone-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-stone-900">
+                      <input
+                        type="checkbox"
+                        checked={metabolicPrefs.addedSugarMonitoringEnabled}
+                        onChange={(e) =>
+                          setMetabolicPrefs((prev) => ({
+                            ...prev,
+                            addedSugarMonitoringEnabled: e.target.checked,
+                          }))
+                        }
+                        className="rounded text-teal-600 focus:ring-teal-500"
+                      />
+                      <Candy className="h-4 w-4 text-rose-500" />
+                      <span>Kiểm soát Đường bổ sung (Added Sugar)</span>
+                    </label>
+                    <span className="text-[11px] text-stone-500">
+                      Khuyến nghị WHO: &lt; 25g/ngày
+                    </span>
+                  </div>
+
+                  {metabolicPrefs.addedSugarMonitoringEnabled && (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-stone-100">
+                      <span className="text-xs text-stone-600">
+                        Mục tiêu đường bổ sung tối đa trong ngày:
+                      </span>
+                      <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={metabolicPrefs.dailyAddedSugarTargetG ?? 25}
+                          onChange={(e) =>
+                            setMetabolicPrefs((prev) => ({
+                              ...prev,
+                              dailyAddedSugarTargetG: e.target.value === "" ? undefined : Number(e.target.value),
+                            }))
+                          }
+                          className="w-20 rounded-xl border border-stone-200 px-3 py-1.5 text-xs font-bold text-stone-900 focus:border-teal-500 focus:outline-none"
+                        />
+                        <span className="text-xs text-stone-500 font-semibold">g / ngày</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 4. Glycemic Index & Morning High-GI */}
+                <div className="rounded-2xl bg-white p-3 border border-stone-200 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-stone-900">
+                    <input
+                      type="checkbox"
+                      checked={metabolicPrefs.giMonitoringEnabled}
+                      onChange={(e) =>
+                        setMetabolicPrefs((prev) => ({
+                          ...prev,
+                          giMonitoringEnabled: e.target.checked,
+                        }))
+                      }
+                      className="rounded text-teal-600 focus:ring-teal-500"
+                    />
+                    <span>Giám sát Chỉ số đường huyết (GI) & Tải lượng (GL)</span>
+                  </label>
+
+                  {metabolicPrefs.giMonitoringEnabled && (
+                    <div className="pl-6 pt-1 space-y-2">
+                      <label className="flex items-start gap-2 cursor-pointer text-xs text-stone-700">
+                        <input
+                          type="checkbox"
+                          checked={metabolicPrefs.morningHighGiWarningEnabled}
+                          onChange={(e) =>
+                            setMetabolicPrefs((prev) => ({
+                              ...prev,
+                              morningHighGiWarningEnabled: e.target.checked,
+                            }))
+                          }
+                          className="rounded text-teal-600 focus:ring-teal-500 mt-0.5"
+                        />
+                        <div>
+                          <span className="font-semibold block text-stone-900">
+                            Cảnh báo món GI cao trong khung giờ sáng sớm (05:00 - 09:30)
+                          </span>
+                          <span className="text-[10px] text-stone-500 block leading-tight mt-0.5">
+                            Sau khi nhịn qua đêm, tinh bột tinh chế đơn lẻ có thể làm đường huyết tăng vọt rồi tụt nhanh. Hệ thống sẽ gợi ý bổ sung đạm/chất xơ để ổn định năng lượng.
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                {/* 5. Meal Spacing & Snacking */}
+                <div className="rounded-2xl bg-white p-3 border border-stone-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-stone-900">
+                      <input
+                        type="checkbox"
+                        checked={metabolicPrefs.mealTimingMonitoringEnabled}
+                        onChange={(e) =>
+                          setMetabolicPrefs((prev) => ({
+                            ...prev,
+                            mealTimingMonitoringEnabled: e.target.checked,
+                          }))
+                        }
+                        className="rounded text-teal-600 focus:ring-teal-500"
+                      />
+                      <Timer className="h-4 w-4 text-teal-600" />
+                      <span>Giám sát Khoảng cách giữa các bữa ăn</span>
+                    </label>
+                  </div>
+
+                  {metabolicPrefs.mealTimingMonitoringEnabled && (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-stone-100">
+                      <span className="text-xs text-stone-600">
+                        Khoảng cách tối thiểu giữa 2 lần ăn (tránh ăn vặt liên tục):
+                      </span>
+                      <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                        <input
+                          type="number"
+                          min="60"
+                          max="360"
+                          step="15"
+                          value={metabolicPrefs.minimumMealIntervalMinutes}
+                          onChange={(e) =>
+                            setMetabolicPrefs((prev) => ({
+                              ...prev,
+                              minimumMealIntervalMinutes: Math.max(30, Number(e.target.value)),
+                            }))
+                          }
+                          className="w-20 rounded-xl border border-stone-200 px-3 py-1.5 text-xs font-bold text-stone-900 focus:border-teal-500 focus:outline-none"
+                        />
+                        <span className="text-xs text-stone-500 font-semibold">phút (~{round((metabolicPrefs.minimumMealIntervalMinutes || 180) / 60, 1)}h)</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 6. Custom Dietary Notes */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-stone-800">
+                    Ghi chú dinh dưỡng cá nhân (Tùy chọn):
+                  </label>
+                  <input
+                    type="text"
+                    value={metabolicPrefs.customDietaryNotes || ""}
+                    onChange={(e) =>
+                      setMetabolicPrefs((prev) => ({
+                        ...prev,
+                        customDietaryNotes: e.target.value,
+                      }))
+                    }
+                    placeholder="Ví dụ: Bác sĩ yêu cầu kiêng đường tinh luyện, giảm tinh bột trắng..."
+                    className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs text-stone-800 placeholder:text-stone-400 focus:border-teal-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

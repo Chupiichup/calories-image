@@ -10,6 +10,13 @@
 import { createClient } from "@/lib/supabase/client";
 import { SEED_FOODS, type FoodItem } from "@/lib/data/seedFoods";
 import { round, type BiologicalSex, type ActivityLevel, type WeightLossPace, type NutritionValues } from "@/lib/nutrition";
+import {
+  type MetabolicPreferences,
+  DEFAULT_METABOLIC_PREFERENCES,
+  type SugarClassification,
+  type GiCategory,
+  type GlCategory,
+} from "@/lib/metabolic";
 
 export type StoredProfile = {
   id: string;
@@ -52,6 +59,14 @@ export type StoredMealItem = {
   nutritionSource: string;
   isAiEstimated: boolean;
   confidence?: number;
+  sugarClassification?: SugarClassification;
+  addedSugarG?: number;
+  totalSugarG?: number;
+  giValue?: number;
+  giCategory?: GiCategory;
+  glValue?: number;
+  glCategory?: GlCategory;
+  metabolicNotes?: string;
 };
 
 export type StoredMeal = {
@@ -465,6 +480,14 @@ export const repository = {
               nutritionSource: it.nutrition_source,
               isAiEstimated: it.is_ai_estimated,
               confidence: it.confidence ? Number(it.confidence) : undefined,
+              sugarClassification: it.sugar_classification || "UNKNOWN",
+              addedSugarG: it.added_sugar_g !== null && it.added_sugar_g !== undefined ? Number(it.added_sugar_g) : 0,
+              totalSugarG: it.total_sugar_g !== null && it.total_sugar_g !== undefined ? Number(it.total_sugar_g) : 0,
+              giValue: it.gi_value ? Number(it.gi_value) : undefined,
+              giCategory: it.gi_category || "unknown",
+              glValue: it.gl_value !== null && it.gl_value !== undefined ? Number(it.gl_value) : undefined,
+              glCategory: it.gl_category || "unknown",
+              metabolicNotes: it.metabolic_notes || undefined,
             }));
 
             return {
@@ -533,6 +556,14 @@ export const repository = {
               nutritionSource: it.nutrition_source,
               isAiEstimated: it.is_ai_estimated,
               confidence: it.confidence ? Number(it.confidence) : undefined,
+              sugarClassification: it.sugar_classification || "UNKNOWN",
+              addedSugarG: it.added_sugar_g !== null && it.added_sugar_g !== undefined ? Number(it.added_sugar_g) : 0,
+              totalSugarG: it.total_sugar_g !== null && it.total_sugar_g !== undefined ? Number(it.total_sugar_g) : 0,
+              giValue: it.gi_value ? Number(it.gi_value) : undefined,
+              giCategory: it.gi_category || "unknown",
+              glValue: it.gl_value !== null && it.gl_value !== undefined ? Number(it.gl_value) : undefined,
+              glCategory: it.gl_category || "unknown",
+              metabolicNotes: it.metabolic_notes || undefined,
             }));
 
             return {
@@ -580,6 +611,14 @@ export const repository = {
       isAiEstimated?: boolean;
       confidence?: number;
       nutritionSource?: string;
+      sugarClassification?: SugarClassification;
+      addedSugarG?: number;
+      totalSugarG?: number;
+      giValue?: number;
+      giCategory?: GiCategory;
+      glValue?: number;
+      glCategory?: GlCategory;
+      metabolicNotes?: string;
     }>;
   }): Promise<StoredMeal> {
     const mealId = `meal-${Date.now()}`;
@@ -597,6 +636,14 @@ export const repository = {
       nutritionSource: it.nutritionSource || (it.isAiEstimated ? "AI Vision" : "Thủ công"),
       isAiEstimated: Boolean(it.isAiEstimated),
       confidence: it.confidence ? Math.min(1, Math.max(0, Number(it.confidence))) : undefined,
+      sugarClassification: it.sugarClassification || "UNKNOWN",
+      addedSugarG: typeof it.addedSugarG === "number" ? round(it.addedSugarG, 1) : 0,
+      totalSugarG: typeof it.totalSugarG === "number" ? round(it.totalSugarG, 1) : 0,
+      giValue: it.giValue,
+      giCategory: it.giCategory || "unknown",
+      glValue: it.glValue,
+      glCategory: it.glCategory || "unknown",
+      metabolicNotes: it.metabolicNotes,
     }));
 
     const newMeal: StoredMeal = {
@@ -652,6 +699,14 @@ export const repository = {
               nutrition_source: it.nutritionSource,
               is_ai_estimated: it.isAiEstimated,
               confidence: it.confidence || null,
+              sugar_classification: it.sugarClassification || "UNKNOWN",
+              added_sugar_g: typeof it.addedSugarG === "number" ? it.addedSugarG : 0,
+              total_sugar_g: typeof it.totalSugarG === "number" ? it.totalSugarG : 0,
+              gi_value: it.giValue ?? null,
+              gi_category: it.giCategory || "unknown",
+              gl_value: it.glValue ?? null,
+              gl_category: it.glCategory || "unknown",
+              metabolic_notes: it.metabolicNotes ?? null,
             }));
 
             const { error: itemsErr } = await supabase.from("meal_items").insert(itemsToInsert);
@@ -935,7 +990,136 @@ export const repository = {
     );
   },
 
-  // 4. Data Export & Restore
+  // 4. Metabolic Health Preferences
+  async getMetabolicPreferences(): Promise<MetabolicPreferences> {
+    const supabase = createClient();
+    if (supabase) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        const { data: dbPrefs, error } = await supabase
+          .from("metabolic_preferences")
+          .select("*")
+          .eq("user_id", user.id)
+          .single();
+
+        if (dbPrefs && !error) {
+          const targetSugar = dbPrefs.daily_added_sugar_target_g !== null && dbPrefs.daily_added_sugar_target_g !== undefined ? Number(dbPrefs.daily_added_sugar_target_g) : 25;
+          const isEnabled = Boolean(dbPrefs.metabolic_monitoring_enabled);
+          const resolved: MetabolicPreferences = {
+            enabled: isEnabled,
+            metabolicMonitoringEnabled: isEnabled,
+            strictness: dbPrefs.strictness || "balanced",
+            focusFattyLiver: Boolean(dbPrefs.fatty_liver_consideration),
+            fattyLiverConsideration: Boolean(dbPrefs.fatty_liver_consideration),
+            focusHighInsulin: Boolean(dbPrefs.high_insulin_consideration),
+            highInsulinConsideration: Boolean(dbPrefs.high_insulin_consideration),
+            addedSugarMonitoringEnabled: Boolean(dbPrefs.added_sugar_monitoring_enabled),
+            giMonitoringEnabled: Boolean(dbPrefs.gi_monitoring_enabled),
+            mealTimingMonitoringEnabled: Boolean(dbPrefs.meal_timing_monitoring_enabled),
+            mealFrequencyMonitoringEnabled: Boolean(dbPrefs.meal_frequency_monitoring_enabled),
+            dailyAddedSugarLimitG: targetSugar,
+            dailyAddedSugarTargetG: targetSugar,
+            dailyTotalSugarTargetG: dbPrefs.daily_total_sugar_target_g !== null && dbPrefs.daily_total_sugar_target_g !== undefined ? Number(dbPrefs.daily_total_sugar_target_g) : undefined,
+            dailyGlycemicLoadTarget: dbPrefs.daily_glycemic_load_target !== null && dbPrefs.daily_glycemic_load_target !== undefined ? Number(dbPrefs.daily_glycemic_load_target) : undefined,
+            preferredMealsPerDay: Number(dbPrefs.preferred_meals_per_day) || 3,
+            minMealIntervalMinutes: Number(dbPrefs.minimum_meal_interval_minutes) || 180,
+            minimumMealIntervalMinutes: Number(dbPrefs.minimum_meal_interval_minutes) || 180,
+            preferredFirstMealTime: dbPrefs.preferred_first_meal_time || "07:00",
+            preferredLastMealTime: dbPrefs.preferred_last_meal_time || "19:30",
+            warnMorningHighGi: Boolean(dbPrefs.morning_high_gi_warning_enabled),
+            morningHighGiWarningEnabled: Boolean(dbPrefs.morning_high_gi_warning_enabled),
+            morningWindowStart: dbPrefs.morning_window_start || "05:00",
+            morningWindowEnd: dbPrefs.morning_window_end || "09:30",
+            showAlternatives: true,
+            customDietaryNotes: dbPrefs.custom_dietary_notes || "",
+          };
+          setStorage("metabolic_preferences", resolved);
+          return resolved;
+        }
+      }
+    }
+
+    const local = getStorage<MetabolicPreferences>("metabolic_preferences", DEFAULT_METABOLIC_PREFERENCES);
+    return {
+      ...DEFAULT_METABOLIC_PREFERENCES,
+      ...local,
+      enabled: local.enabled ?? local.metabolicMonitoringEnabled ?? DEFAULT_METABOLIC_PREFERENCES.enabled,
+      metabolicMonitoringEnabled: local.metabolicMonitoringEnabled ?? local.enabled ?? DEFAULT_METABOLIC_PREFERENCES.metabolicMonitoringEnabled,
+      dailyAddedSugarLimitG: local.dailyAddedSugarLimitG ?? local.dailyAddedSugarTargetG ?? DEFAULT_METABOLIC_PREFERENCES.dailyAddedSugarLimitG,
+      dailyAddedSugarTargetG: local.dailyAddedSugarTargetG ?? local.dailyAddedSugarLimitG ?? DEFAULT_METABOLIC_PREFERENCES.dailyAddedSugarTargetG,
+      minMealIntervalMinutes: local.minMealIntervalMinutes ?? local.minimumMealIntervalMinutes ?? DEFAULT_METABOLIC_PREFERENCES.minMealIntervalMinutes,
+      minimumMealIntervalMinutes: local.minimumMealIntervalMinutes ?? local.minMealIntervalMinutes ?? DEFAULT_METABOLIC_PREFERENCES.minimumMealIntervalMinutes,
+      focusFattyLiver: local.focusFattyLiver ?? local.fattyLiverConsideration ?? DEFAULT_METABOLIC_PREFERENCES.focusFattyLiver,
+      fattyLiverConsideration: local.fattyLiverConsideration ?? local.focusFattyLiver ?? DEFAULT_METABOLIC_PREFERENCES.fattyLiverConsideration,
+      focusHighInsulin: local.focusHighInsulin ?? local.highInsulinConsideration ?? DEFAULT_METABOLIC_PREFERENCES.focusHighInsulin,
+      highInsulinConsideration: local.highInsulinConsideration ?? local.focusHighInsulin ?? DEFAULT_METABOLIC_PREFERENCES.highInsulinConsideration,
+      warnMorningHighGi: local.warnMorningHighGi ?? local.morningHighGiWarningEnabled ?? DEFAULT_METABOLIC_PREFERENCES.warnMorningHighGi,
+      morningHighGiWarningEnabled: local.morningHighGiWarningEnabled ?? local.warnMorningHighGi ?? DEFAULT_METABOLIC_PREFERENCES.morningHighGiWarningEnabled,
+    };
+  },
+
+  async saveMetabolicPreferences(prefs: MetabolicPreferences): Promise<MetabolicPreferences> {
+    const normalized: MetabolicPreferences = {
+      ...prefs,
+      enabled: prefs.enabled ?? prefs.metabolicMonitoringEnabled ?? true,
+      metabolicMonitoringEnabled: prefs.metabolicMonitoringEnabled ?? prefs.enabled ?? true,
+      dailyAddedSugarLimitG: prefs.dailyAddedSugarLimitG ?? prefs.dailyAddedSugarTargetG ?? 25,
+      dailyAddedSugarTargetG: prefs.dailyAddedSugarTargetG ?? prefs.dailyAddedSugarLimitG ?? 25,
+      minMealIntervalMinutes: prefs.minMealIntervalMinutes ?? prefs.minimumMealIntervalMinutes ?? 180,
+      minimumMealIntervalMinutes: prefs.minimumMealIntervalMinutes ?? prefs.minMealIntervalMinutes ?? 180,
+      focusFattyLiver: prefs.focusFattyLiver ?? prefs.fattyLiverConsideration ?? true,
+      fattyLiverConsideration: prefs.fattyLiverConsideration ?? prefs.focusFattyLiver ?? true,
+      focusHighInsulin: prefs.focusHighInsulin ?? prefs.highInsulinConsideration ?? true,
+      highInsulinConsideration: prefs.highInsulinConsideration ?? prefs.focusHighInsulin ?? true,
+      warnMorningHighGi: prefs.warnMorningHighGi ?? prefs.morningHighGiWarningEnabled ?? true,
+      morningHighGiWarningEnabled: prefs.morningHighGiWarningEnabled ?? prefs.warnMorningHighGi ?? true,
+    };
+    setStorage("metabolic_preferences", normalized);
+
+    const supabase = createClient();
+    if (supabase) {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (user) {
+          await supabase.from("metabolic_preferences").upsert({
+            user_id: user.id,
+            metabolic_monitoring_enabled: normalized.enabled,
+            strictness: normalized.strictness,
+            fatty_liver_consideration: normalized.focusFattyLiver,
+            high_insulin_consideration: normalized.focusHighInsulin,
+            added_sugar_monitoring_enabled: normalized.addedSugarMonitoringEnabled ?? true,
+            gi_monitoring_enabled: normalized.giMonitoringEnabled ?? true,
+            meal_timing_monitoring_enabled: normalized.mealTimingMonitoringEnabled ?? true,
+            meal_frequency_monitoring_enabled: normalized.mealFrequencyMonitoringEnabled ?? true,
+            daily_added_sugar_target_g: normalized.dailyAddedSugarLimitG,
+            daily_total_sugar_target_g: normalized.dailyTotalSugarTargetG ?? null,
+            daily_glycemic_load_target: normalized.dailyGlycemicLoadTarget ?? null,
+            preferred_meals_per_day: normalized.preferredMealsPerDay ?? 3,
+            minimum_meal_interval_minutes: normalized.minMealIntervalMinutes,
+            preferred_first_meal_time: normalized.preferredFirstMealTime || "07:00",
+            preferred_last_meal_time: normalized.preferredLastMealTime || "19:30",
+            morning_high_gi_warning_enabled: normalized.warnMorningHighGi,
+            morning_window_start: normalized.morningWindowStart || "05:00",
+            morning_window_end: normalized.morningWindowEnd || "09:30",
+            custom_dietary_notes: normalized.customDietaryNotes || null,
+            updated_at: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.error("Save metabolic preferences to Supabase error:", err);
+      }
+    }
+
+    return normalized;
+  },
+
+  // 5. Data Export & Restore
   async exportAllData(): Promise<string> {
     const { profile, goal } = await this.getProfile();
     const meals = await this.getAllMeals();

@@ -65,7 +65,11 @@ Hãy trả về duy nhất định dạng JSON thuần túy (không kèm giải 
       "preparationMethod": string,
       "ingredients": string[],
       "notes": string,
-      "uncertainties": string[]
+      "uncertainties": string[],
+      "sugarClassification": "NO_KNOWN_SUGAR" | "NATURAL_SUGAR" | "ADDED_SUGAR" | "BOTH_NATURAL_AND_ADDED" | "UNKNOWN" (phân loại đường nguồn gốc),
+      "estimatedAddedSugarG": number (đường bổ sung g, ví dụ sữa đặc, đường mía, siro),
+      "estimatedTotalSugarG": number (tổng đường g),
+      "giCategory": "low" | "medium" | "high" | "unknown" (chỉ số đường huyết)
     }
   ],
   "observations": string,

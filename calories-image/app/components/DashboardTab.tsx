@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   Camera,
   Plus,
@@ -16,8 +16,22 @@ import {
   Clock,
   ChevronRight,
   Calendar,
+  HeartPulse,
+  AlertCircle,
+  ShieldCheck,
 } from "lucide-react";
-import type { StoredMeal, StoredGoal, StoredWeightEntry, StoredProfile } from "@/lib/db/repository";
+import {
+  type StoredMeal,
+  type StoredGoal,
+  type StoredWeightEntry,
+  type StoredProfile,
+  repository,
+} from "@/lib/db/repository";
+import {
+  type MetabolicPreferences,
+  DEFAULT_METABOLIC_PREFERENCES,
+  evaluateDailySugarStatus,
+} from "@/lib/metabolic";
 import type { CoachingInsight } from "@/lib/coaching";
 import { round } from "@/lib/nutrition";
 
@@ -56,6 +70,42 @@ export function DashboardTab({
       totalFiber += item.fiber;
     });
   });
+
+  const [metabolicPrefs, setMetabolicPrefs] = useState<MetabolicPreferences>(DEFAULT_METABOLIC_PREFERENCES);
+
+  useEffect(() => {
+    repository.getMetabolicPreferences().then((p) => {
+      if (p) setMetabolicPrefs(p);
+    });
+  }, []);
+
+  let todayAddedSugarG = 0;
+  let todayTotalSugarG = 0;
+  let mealsWithAddedSugarCount = 0;
+  let highGiMealsCount = 0;
+
+  todayMeals.forEach((meal) => {
+    let mealHasAddedSugar = false;
+    let mealHasHighGi = false;
+    meal.items.forEach((item) => {
+      if (item.addedSugarG && item.addedSugarG > 0) {
+        todayAddedSugarG += item.addedSugarG;
+        mealHasAddedSugar = true;
+      }
+      if (item.totalSugarG && item.totalSugarG > 0) {
+        todayTotalSugarG += item.totalSugarG;
+      }
+      if (item.giCategory === "high") {
+        mealHasHighGi = true;
+      }
+    });
+    if (mealHasAddedSugar) mealsWithAddedSugarCount++;
+    if (mealHasHighGi) highGiMealsCount++;
+  });
+
+  const dailySugarLimit = metabolicPrefs.dailyAddedSugarLimitG || 25;
+  const sugarStatus = evaluateDailySugarStatus(todayAddedSugarG, dailySugarLimit);
+  const sugarPercent = Math.round((todayAddedSugarG / dailySugarLimit) * 100);
 
   const remainingCalories = goal.dailyCalorieTarget - totalCalories;
   const caloriePercent = Math.min(Math.round((totalCalories / goal.dailyCalorieTarget) * 100), 100);
@@ -238,6 +288,115 @@ export function DashboardTab({
         </div>
       </section>
 
+      {/* Metabolic Health Guardrail Section */}
+      {metabolicPrefs.enabled && (
+        <section className="rounded-3xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50/70 via-white to-amber-50/40 p-5 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-xs">
+                <HeartPulse className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-stone-900">
+                    Kiểm soát Dinh dưỡng Chuyển hóa & Đường (Metabolic Guardrails)
+                  </h3>
+                  {metabolicPrefs.focusFattyLiver && (
+                    <span className="hidden sm:inline-block rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                      Gan nhiễm mỡ
+                    </span>
+                  )}
+                  {metabolicPrefs.focusHighInsulin && (
+                    <span className="hidden sm:inline-block rounded-md bg-teal-100 px-2 py-0.5 text-[10px] font-bold text-teal-800">
+                      Insulin cao
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-stone-500">
+                  Chế độ: {metabolicPrefs.strictness === "gentle" ? "Nhẹ nhàng" : metabolicPrefs.strictness === "strict" ? "Nghiêm ngặt" : "Cân bằng (Khuyên dùng)"} • Trần đường thêm WHO: {metabolicPrefs.dailyAddedSugarLimitG}g/ngày
+                </p>
+              </div>
+            </div>
+
+            {/* Status Pill */}
+            <div>
+              {sugarStatus === "NORMAL" && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 border border-emerald-300">
+                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>Đường thêm an toàn ({round(todayAddedSugarG, 1)}/{metabolicPrefs.dailyAddedSugarLimitG}g)</span>
+                </span>
+              )}
+              {sugarStatus === "APPROACHING" && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800 border border-amber-300">
+                  <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                  <span>Tiệm cận giới hạn ({round(todayAddedSugarG, 1)}/{metabolicPrefs.dailyAddedSugarLimitG}g)</span>
+                </span>
+              )}
+              {sugarStatus === "EXCEEDED" && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-800 border border-rose-300">
+                  <AlertCircle className="h-3.5 w-3.5 text-rose-600" />
+                  <span>Đã vượt ngưỡng ({round(todayAddedSugarG, 1)}/{metabolicPrefs.dailyAddedSugarLimitG}g)</span>
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="rounded-2xl bg-white p-3 border border-stone-200/80 shadow-xs">
+              <span className="text-[11px] font-semibold text-stone-500">Đường thêm hôm nay</span>
+              <div className="mt-1 flex items-baseline gap-1">
+                <span className="text-xl font-bold text-stone-900">{round(todayAddedSugarG, 1)}</span>
+                <span className="text-xs text-stone-500">/{metabolicPrefs.dailyAddedSugarLimitG}g</span>
+              </div>
+              <div className="mt-1.5 h-1.5 w-full rounded-full bg-stone-100 overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${
+                    sugarStatus === "EXCEEDED"
+                      ? "bg-rose-500"
+                      : sugarStatus === "APPROACHING"
+                      ? "bg-amber-500"
+                      : "bg-emerald-500"
+                  }`}
+                  style={{ width: `${Math.min(100, sugarPercent)}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-white p-3 border border-stone-200/80 shadow-xs">
+              <span className="text-[11px] font-semibold text-stone-500">Bữa có đường thêm</span>
+              <div className="mt-1 flex items-baseline gap-1">
+                <span className="text-xl font-bold text-stone-900">{mealsWithAddedSugarCount}</span>
+                <span className="text-xs text-stone-500">/{todayMeals.length} bữa</span>
+              </div>
+              <span className="text-[10px] text-stone-400 mt-1 block">
+                {mealsWithAddedSugarCount === 0 ? "Tuyệt vời, không có đường ẩn" : "Nên dồn vào bữa chính"}
+              </span>
+            </div>
+
+            <div className="rounded-2xl bg-white p-3 border border-stone-200/80 shadow-xs">
+              <span className="text-[11px] font-semibold text-stone-500">Bữa ăn GI cao</span>
+              <div className="mt-1 flex items-baseline gap-1">
+                <span className="text-xl font-bold text-stone-900">{highGiMealsCount}</span>
+                <span className="text-xs text-stone-500">bữa</span>
+              </div>
+              <span className="text-[10px] text-stone-400 mt-1 block">
+                {highGiMealsCount === 0 ? "Kiểm soát tải đường huyết tốt" : "Nên ăn kèm đạm & rau xanh"}
+              </span>
+            </div>
+
+            <div className="rounded-2xl bg-white p-3 border border-stone-200/80 shadow-xs">
+              <span className="text-[11px] font-semibold text-stone-500">Khoảng cách bữa tối thiểu</span>
+              <div className="mt-1 flex items-baseline gap-1">
+                <span className="text-xl font-bold text-stone-900">{(metabolicPrefs.minMealIntervalMinutes || 180) / 60}</span>
+                <span className="text-xs text-stone-500">tiếng</span>
+              </div>
+              <span className="text-[10px] text-stone-400 mt-1 block">Giúp nền insulin hạ về bình thường</span>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Main Grid: Coaching Advice & Recent Meals & Weight */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Today's Logged Meals (2 Cols) */}
@@ -336,9 +495,19 @@ export function DashboardTab({
                       {meal.items.map((it) => (
                         <span
                           key={it.id}
-                          className="inline-flex items-center rounded-lg bg-stone-100 px-2.5 py-1 text-xs text-stone-700"
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-stone-100 px-2.5 py-1 text-xs text-stone-700"
                         >
-                          {it.foodNameSnapshot} ({it.portionG}g)
+                          <span>{it.foodNameSnapshot} ({it.portionG}g)</span>
+                          {it.addedSugarG !== undefined && it.addedSugarG > 0 && (
+                            <span className="rounded bg-amber-200/80 px-1 py-0.2 text-[10px] font-bold text-amber-800">
+                              +{it.addedSugarG}g đường
+                            </span>
+                          )}
+                          {it.giCategory === "high" && (
+                            <span className="rounded bg-rose-100 px-1 py-0.2 text-[10px] font-bold text-rose-700">
+                              GI cao
+                            </span>
+                          )}
                         </span>
                       ))}
                     </div>

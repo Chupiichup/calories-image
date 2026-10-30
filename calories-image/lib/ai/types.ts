@@ -15,6 +15,12 @@ export const DetectedItemSchema = z.object({
   ingredients: z.array(z.string()).optional(),
   notes: z.string().optional(),
   uncertainties: z.array(z.string()).optional(),
+  sugarClassification: z.enum(["NO_KNOWN_SUGAR", "NATURAL_SUGAR", "ADDED_SUGAR", "BOTH_NATURAL_AND_ADDED", "UNKNOWN"]).optional(),
+  estimatedAddedSugarG: z.number().nonnegative().optional(),
+  estimatedTotalSugarG: z.number().nonnegative().optional(),
+  giEstimate: z.number().nonnegative().optional(),
+  giCategory: z.enum(["low", "medium", "high", "unknown", "not_applicable"]).optional(),
+  hiddenSugarNotes: z.string().optional(),
 });
 
 export const MealAnalysisResponseSchema = z.object({

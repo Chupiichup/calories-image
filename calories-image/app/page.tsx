@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Navigation, type TabType } from "@/app/components/Navigation";
 import { DashboardTab } from "@/app/components/DashboardTab";
 import { DiaryTab } from "@/app/components/DiaryTab";
@@ -49,6 +49,48 @@ export default function Home() {
   useEffect(() => {
     setSelectedDate(getLocalDateString());
   }, []);
+
+  // Load data whenever selectedDate changes
+  const loadData = useCallback(async (dateForDiary?: string, showLoading = true) => {
+    try {
+      if (showLoading) {
+        setIsLoading(true);
+      }
+      const isSupabaseActive = isSupabaseConfigured();
+      setIsDemoMode(!isSupabaseActive);
+
+      const todayStr = getLocalDateString();
+      const targetDiaryDate = dateForDiary || selectedDate || todayStr;
+
+      const { profile: p, goal: g } = await repository.getProfile();
+      setProfile(p);
+      setGoal(g);
+
+      // ALWAYS load today's meals for Dashboard metrics & remaining calories
+      const mealsToday = await repository.getMealsForDate(todayStr);
+      setTodayMeals(mealsToday);
+
+      // Load diary meals for the selected date
+      if (targetDiaryDate === todayStr) {
+        setDiaryMeals(mealsToday);
+      } else {
+        const mealsSelected = await repository.getMealsForDate(targetDiaryDate);
+        setDiaryMeals(mealsSelected);
+      }
+
+      const all = await repository.getAllMeals();
+      setAllMeals(all);
+
+      const weights = await repository.getWeightEntries();
+      setWeightEntries(weights);
+    } catch (err) {
+      console.error("Error loading nutrition coach data:", err);
+    } finally {
+      if (showLoading) {
+        setIsLoading(false);
+      }
+    }
+  }, [selectedDate]);
 
   // Listen to Supabase Auth state and session
   useEffect(() => {
@@ -133,55 +175,13 @@ export default function Home() {
       if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
-  }, [currentUser, selectedDate]);
-
-  // Load data whenever selectedDate changes
-  const loadData = async (dateForDiary?: string, showLoading = true) => {
-    try {
-      if (showLoading) {
-        setIsLoading(true);
-      }
-      const isSupabaseActive = isSupabaseConfigured();
-      setIsDemoMode(!isSupabaseActive);
-
-      const todayStr = getLocalDateString();
-      const targetDiaryDate = dateForDiary || selectedDate || todayStr;
-
-      const { profile: p, goal: g } = await repository.getProfile();
-      setProfile(p);
-      setGoal(g);
-
-      // ALWAYS load today's meals for Dashboard metrics & remaining calories
-      const mealsToday = await repository.getMealsForDate(todayStr);
-      setTodayMeals(mealsToday);
-
-      // Load diary meals for the selected date
-      if (targetDiaryDate === todayStr) {
-        setDiaryMeals(mealsToday);
-      } else {
-        const mealsSelected = await repository.getMealsForDate(targetDiaryDate);
-        setDiaryMeals(mealsSelected);
-      }
-
-      const all = await repository.getAllMeals();
-      setAllMeals(all);
-
-      const weights = await repository.getWeightEntries();
-      setWeightEntries(weights);
-    } catch (err) {
-      console.error("Error loading nutrition coach data:", err);
-    } finally {
-      if (showLoading) {
-        setIsLoading(false);
-      }
-    }
-  };
+  }, [currentUser, selectedDate, loadData]);
 
   useEffect(() => {
     if (selectedDate) {
       loadData(selectedDate);
     }
-  }, [selectedDate]);
+  }, [selectedDate, loadData]);
 
   // Handler: Manual Sync Button
   const handleManualSync = async () => {

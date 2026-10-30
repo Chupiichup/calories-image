@@ -86,6 +86,7 @@ export function DiaryTab({
   let totalCarbs = 0;
   let totalFat = 0;
   let totalFiber = 0;
+  let totalAddedSugar = 0;
 
   meals.forEach((m) => {
     if (mealGroups[m.mealType]) {
@@ -100,6 +101,7 @@ export function DiaryTab({
       totalCarbs += it.carbs;
       totalFat += it.fat;
       totalFiber += it.fiber;
+      if (it.addedSugarG) totalAddedSugar += it.addedSugarG;
     });
   });
 
@@ -149,6 +151,14 @@ export function DiaryTab({
             <span>Đạm: </span>
             <strong className="text-emerald-700 font-bold">{round(totalProtein, 0)}g</strong> / {goal.dailyProteinTargetG}g
           </div>
+          {totalAddedSugar > 0 && (
+            <div className="border-l border-stone-200 pl-4 hidden md:block">
+              <span>Đường thêm: </span>
+              <strong className={totalAddedSugar > 25 ? "text-rose-600 font-bold" : "text-amber-700 font-bold"}>
+                +{round(totalAddedSugar, 1)}g
+              </strong>
+            </div>
+          )}
         </div>
       </div>
 
@@ -286,10 +296,20 @@ export function DiaryTab({
                       {/* Food Items in Meal */}
                       <div className="divide-y divide-stone-100">
                         {meal.items.map((item) => (
-                          <div key={item.id} className="flex items-center justify-between py-1.5 text-xs">
-                            <div>
+                          <div key={item.id} className="flex flex-col sm:flex-row sm:items-center justify-between py-1.5 text-xs gap-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <span className="font-semibold text-stone-800">{item.foodNameSnapshot}</span>
-                              <span className="ml-2 text-stone-500">({item.portionG}g)</span>
+                              <span className="text-stone-500">({item.portionG}g)</span>
+                              {item.addedSugarG !== undefined && item.addedSugarG > 0 && (
+                                <span className="rounded bg-amber-100 px-1.5 py-0.2 text-[10px] font-bold text-amber-800 border border-amber-200">
+                                  🍬 +{item.addedSugarG}g đường
+                                </span>
+                              )}
+                              {item.giCategory === "high" && (
+                                <span className="rounded bg-rose-100 px-1.5 py-0.2 text-[10px] font-bold text-rose-700 border border-rose-200">
+                                  ⚡ GI cao
+                                </span>
+                              )}
                             </div>
                             <div className="flex items-center gap-3">
                               <span className="text-stone-500 text-[11px]">{round(item.protein, 1)}g đạm</span>

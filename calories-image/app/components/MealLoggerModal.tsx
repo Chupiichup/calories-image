@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import {
   Camera,
   Image as ImageIcon,
@@ -15,6 +15,10 @@ import {
   Info,
   Calendar,
   Clock,
+  HeartPulse,
+  Flame,
+  CheckCircle2,
+  HelpCircle,
 } from "lucide-react";
 import { SEED_FOODS, searchFoods, type FoodItem } from "@/lib/data/seedFoods";
 import { scaleNutritionValues, round, type NutritionValues } from "@/lib/nutrition";
@@ -22,8 +26,18 @@ import {
   formatToVietnamDateTimeLocal,
   vietnamDateTimeLocalToIso,
   getLocalDateString,
+  repository,
   type StoredMeal,
 } from "@/lib/db/repository";
+import {
+  type SugarClassification,
+  type GiCategory,
+  type GlCategory,
+  type MetabolicPreferences,
+  DEFAULT_METABOLIC_PREFERENCES,
+  resolveItemMetabolicDetails,
+  evaluateMealMetabolic,
+} from "@/lib/metabolic";
 
 interface MealLoggerModalProps {
   isOpen: boolean;
@@ -42,6 +56,14 @@ interface MealLoggerModalProps {
       isAiEstimated?: boolean;
       confidence?: number;
       nutritionSource?: string;
+      sugarClassification?: SugarClassification;
+      addedSugarG?: number;
+      totalSugarG?: number;
+      giValue?: number;
+      giCategory?: GiCategory;
+      glValue?: number;
+      glCategory?: GlCategory;
+      metabolicNotes?: string;
     }>;
   }) => Promise<void>;
 }
@@ -57,6 +79,15 @@ type EditableItem = {
   confidence?: number;
   notes?: string;
   uncertainties?: string[];
+  sugarClassification?: SugarClassification;
+  addedSugarG?: number;
+  totalSugarG?: number;
+  giValue?: number;
+  giCategory?: GiCategory;
+  glValue?: number;
+  glCategory?: GlCategory;
+  clarificationQuestion?: string;
+  suggestedAlternative?: string;
 };
 
 export function MealLoggerModal({
@@ -85,10 +116,44 @@ export function MealLoggerModal({
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
 
+  // Metabolic tracking context
+  const [metabolicPrefs, setMetabolicPrefs] = useState<MetabolicPreferences>(DEFAULT_METABOLIC_PREFERENCES);
+  const [priorDailyAddedSugarG, setPriorDailyAddedSugarG] = useState(0);
+  const [previousMealEatenAt, setPreviousMealEatenAt] = useState<string | undefined>(undefined);
+  const [todaySnackCount, setTodaySnackCount] = useState(0);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      repository.getMetabolicPreferences().then((p) => {
+        if (p) setMetabolicPrefs(p);
+      });
+      repository.getAllMeals().then((allMeals) => {
+        const todayStr = getLocalDateString(vietnamDateTimeLocalToIso(eatenAtLocal));
+        const todayMeals = allMeals.filter((m) => getLocalDateString(m.eatenAt) === todayStr);
+
+        let sugarAcc = 0;
+        let snacks = 0;
+        todayMeals.forEach((m) => {
+          if (m.mealType === "snack") snacks++;
+          (m.items || []).forEach((it) => {
+            sugarAcc += (it.addedSugarG || 0);
+          });
+        });
+        setPriorDailyAddedSugarG(round(sugarAcc, 1));
+        setTodaySnackCount(snacks);
+
+        if (todayMeals.length > 0) {
+          const sorted = [...todayMeals].sort(
+            (a, b) => new Date(b.eatenAt).getTime() - new Date(a.eatenAt).getTime(),
+          );
+          setPreviousMealEatenAt(sorted[0].eatenAt);
+        }
+      });
+    }
+  }, [isOpen, eatenAtLocal]);
+
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
-
-  if (!isOpen) return null;
 
   // Handle Image Upload / Take Photo with client-side optimization
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -207,18 +272,30 @@ export function MealLoggerModal({
       // Populate candidate items for user review & editing
       const detected: EditableItem[] = (data.candidates || []).map((c: any, idx: number) => {
         const portionG = c.portionG || 100;
+        const baseNutrition = {
+          calories: (c.calories / portionG) * 100,
+          protein: (c.protein / portionG) * 100,
+          carbs: (c.carbs / portionG) * 100,
+          fat: (c.fat / portionG) * 100,
+          fiber: (c.fiber / portionG) * 100,
+        };
+        const metabolic = resolveItemMetabolicDetails({
+          foodName: c.name,
+          portionG,
+          carbsG: c.carbs,
+          aiSugarClassification: c.sugarClassification,
+          aiEstimatedAddedSugarG: c.estimatedAddedSugarG,
+          aiEstimatedTotalSugarG: c.estimatedTotalSugarG,
+          aiGiEstimate: c.giEstimate,
+          aiGiCategory: c.giCategory,
+        });
+
         return {
           id: `ai-${Date.now()}-${idx}`,
           foodId: c.standardizedName,
           foodName: c.name,
           portionG,
-          baseNutritionPer100g: {
-            calories: (c.calories / portionG) * 100,
-            protein: (c.protein / portionG) * 100,
-            carbs: (c.carbs / portionG) * 100,
-            fat: (c.fat / portionG) * 100,
-            fiber: (c.fiber / portionG) * 100,
-          },
+          baseNutritionPer100g: baseNutrition,
           nutrition: {
             calories: c.calories,
             protein: c.protein,
@@ -230,6 +307,15 @@ export function MealLoggerModal({
           confidence: c.confidence,
           notes: c.notes,
           uncertainties: c.uncertainties,
+          sugarClassification: metabolic.sugarClassification,
+          addedSugarG: metabolic.addedSugarG,
+          totalSugarG: metabolic.totalSugarG,
+          giValue: metabolic.giValue,
+          giCategory: metabolic.giCategory,
+          glValue: metabolic.glValue,
+          glCategory: metabolic.glCategory,
+          clarificationQuestion: metabolic.clarificationQuestion,
+          suggestedAlternative: metabolic.suggestedAlternative,
         };
       });
 
@@ -251,22 +337,50 @@ export function MealLoggerModal({
               ...it,
               portionG: "",
               nutrition: { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 },
+              addedSugarG: 0,
+              totalSugarG: 0,
+              glValue: 0,
             };
           }
           const num = Number(rawVal);
           if (isNaN(num)) return it;
           const portionG = Math.max(0, num);
           const ratio = portionG / 100;
+          const scaledCarbs = round(it.baseNutritionPer100g.carbs * ratio, 1);
+          const metabolic = resolveItemMetabolicDetails({
+            foodName: it.foodName,
+            portionG,
+            carbsG: scaledCarbs,
+            aiSugarClassification: it.sugarClassification,
+            aiEstimatedAddedSugarG:
+              typeof it.addedSugarG === "number" && typeof it.portionG === "number" && it.portionG > 0
+                ? round((it.addedSugarG / it.portionG) * portionG, 1)
+                : undefined,
+            aiEstimatedTotalSugarG:
+              typeof it.totalSugarG === "number" && typeof it.portionG === "number" && it.portionG > 0
+                ? round((it.totalSugarG / it.portionG) * portionG, 1)
+                : undefined,
+            aiGiEstimate: it.giValue,
+            aiGiCategory: it.giCategory,
+          });
+
           return {
             ...it,
             portionG,
             nutrition: {
               calories: round(it.baseNutritionPer100g.calories * ratio, 1),
               protein: round(it.baseNutritionPer100g.protein * ratio, 1),
-              carbs: round(it.baseNutritionPer100g.carbs * ratio, 1),
+              carbs: scaledCarbs,
               fat: round(it.baseNutritionPer100g.fat * ratio, 1),
               fiber: round(it.baseNutritionPer100g.fiber * ratio, 1),
             },
+            sugarClassification: metabolic.sugarClassification,
+            addedSugarG: metabolic.addedSugarG,
+            totalSugarG: metabolic.totalSugarG,
+            giValue: metabolic.giValue,
+            giCategory: metabolic.giCategory,
+            glValue: metabolic.glValue,
+            glCategory: metabolic.glCategory,
           };
         }
         return it;
@@ -286,6 +400,61 @@ export function MealLoggerModal({
     setItems((prev) => prev.filter((it) => it.id !== itemId));
   };
 
+  // Metabolic item level handlers
+  const handleUpdateSugarClass = (itemId: string, newClass: SugarClassification) => {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== itemId) return it;
+        let newAddedSugar = it.addedSugarG;
+        if (newClass === "NO_KNOWN_SUGAR") {
+          newAddedSugar = 0;
+        } else if (newClass === "ADDED_SUGAR" && (!newAddedSugar || newAddedSugar === 0)) {
+          newAddedSugar = 10;
+        }
+        return {
+          ...it,
+          sugarClassification: newClass,
+          addedSugarG: newAddedSugar,
+        };
+      }),
+    );
+  };
+
+  const handleUpdateAddedSugar = (itemId: string, newG: number) => {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== itemId) return it;
+        const clamped = Math.max(0, newG);
+        return {
+          ...it,
+          addedSugarG: clamped,
+          sugarClassification:
+            clamped > 0
+              ? it.sugarClassification === "NATURAL_SUGAR" || it.sugarClassification === "BOTH_NATURAL_AND_ADDED"
+                ? "BOTH_NATURAL_AND_ADDED"
+                : "ADDED_SUGAR"
+              : it.sugarClassification === "BOTH_NATURAL_AND_ADDED"
+              ? "NATURAL_SUGAR"
+              : it.sugarClassification,
+        };
+      }),
+    );
+  };
+
+  const handleQuickClarification = (itemId: string, sugarClass: SugarClassification, addedG: number) => {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== itemId) return it;
+        return {
+          ...it,
+          sugarClassification: sugarClass,
+          addedSugarG: addedG,
+          clarificationQuestion: undefined,
+        };
+      }),
+    );
+  };
+
   // Add food from manual catalog search
   const handleAddCatalogFood = (food: FoodItem) => {
     const defaultG = food.defaultPortionG || 100;
@@ -296,18 +465,34 @@ export function MealLoggerModal({
       fat: food.fatPer100g,
       fiber: food.fiberPer100g,
     };
+    const scaledNutrition = scaleNutritionValues({
+      values: baseNutrition,
+      portionG: defaultG,
+      referenceG: 100,
+    });
+    const metabolic = resolveItemMetabolicDetails({
+      foodName: food.name,
+      portionG: defaultG,
+      carbsG: scaledNutrition.carbs,
+    });
+
     const newItem: EditableItem = {
       id: `manual-${Date.now()}`,
       foodId: food.id,
       foodName: food.name,
       portionG: defaultG,
       baseNutritionPer100g: baseNutrition,
-      nutrition: scaleNutritionValues({
-        values: baseNutrition,
-        portionG: defaultG,
-        referenceG: 100,
-      }),
+      nutrition: scaledNutrition,
       isAiEstimated: false,
+      sugarClassification: metabolic.sugarClassification,
+      addedSugarG: metabolic.addedSugarG,
+      totalSugarG: metabolic.totalSugarG,
+      giValue: metabolic.giValue,
+      giCategory: metabolic.giCategory,
+      glValue: metabolic.glValue,
+      glCategory: metabolic.glCategory,
+      clarificationQuestion: metabolic.clarificationQuestion,
+      suggestedAlternative: metabolic.suggestedAlternative,
     };
 
     setItems((prev) => [...prev, newItem]);
@@ -321,6 +506,31 @@ export function MealLoggerModal({
   const totalCarbs = items.reduce((sum, it) => sum + (it.nutrition?.carbs || 0), 0);
   const totalFat = items.reduce((sum, it) => sum + (it.nutrition?.fat || 0), 0);
   const totalFiber = items.reduce((sum, it) => sum + (it.nutrition?.fiber || 0), 0);
+
+  // Evaluate metabolic guardrails for this meal in real time
+  const currentMealMetabolic = useMemo(() => {
+    if (!metabolicPrefs.enabled) return null;
+    return evaluateMealMetabolic({
+      mealType,
+      eatenAtIso: vietnamDateTimeLocalToIso(eatenAtLocal),
+      items: items.map((it) => ({
+        name: it.foodName,
+        carbsG: it.nutrition.carbs,
+        portionG: typeof it.portionG === "number" ? it.portionG : 100,
+        sugarClassification: it.sugarClassification,
+        addedSugarG: it.addedSugarG,
+        totalSugarG: it.totalSugarG,
+        giValue: it.giValue,
+        giCategory: it.giCategory,
+        glValue: it.glValue,
+        glCategory: it.glCategory,
+      })),
+      priorDailyAddedSugarG,
+      preferences: metabolicPrefs,
+      previousMealEatenAtIso: previousMealEatenAt,
+      todaySnackCount,
+    });
+  }, [items, mealType, eatenAtLocal, metabolicPrefs, priorDailyAddedSugarG, previousMealEatenAt, todaySnackCount]);
 
   // Submit and Save Meal
   const handleConfirmSave = async () => {
@@ -344,6 +554,14 @@ export function MealLoggerModal({
         isAiEstimated: it.isAiEstimated,
         confidence: it.confidence,
         nutritionSource: it.isAiEstimated ? "AI Vision" : "Danh mục Viện Dinh Dưỡng",
+        sugarClassification: it.sugarClassification,
+        addedSugarG: it.addedSugarG,
+        totalSugarG: it.totalSugarG,
+        giValue: it.giValue,
+        giCategory: it.giCategory,
+        glValue: it.glValue,
+        glCategory: it.glCategory,
+        metabolicNotes: it.clarificationQuestion,
       })),
     });
 
@@ -351,6 +569,8 @@ export function MealLoggerModal({
   };
 
   const filteredFoods = searchFoods(searchQuery);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 backdrop-blur-sm overflow-y-auto">
@@ -705,55 +925,150 @@ export function MealLoggerModal({
                 {items.map((it) => (
                   <div
                     key={it.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-2xl border border-stone-200 bg-white p-3 shadow-sm hover:border-emerald-300 transition"
+                    className="flex flex-col gap-2 rounded-2xl border border-stone-200 bg-white p-3 shadow-sm hover:border-emerald-300 transition"
                   >
-                    <div className="flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={it.foodName}
-                          onChange={(e) => handleNameChange(it.id, e.target.value)}
-                          className="font-semibold text-sm text-stone-900 border-b border-transparent hover:border-stone-300 focus:border-emerald-500 focus:outline-none bg-transparent"
-                        />
-                        {it.isAiEstimated && (
-                          <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
-                            AI {(it.confidence ? Math.round(it.confidence * 100) : 90)}%
-                          </span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={it.foodName}
+                            onChange={(e) => handleNameChange(it.id, e.target.value)}
+                            className="font-semibold text-sm text-stone-900 border-b border-transparent hover:border-stone-300 focus:border-emerald-500 focus:outline-none bg-transparent"
+                          />
+                          {it.isAiEstimated && (
+                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                              AI {(it.confidence ? Math.round(it.confidence * 100) : 90)}%
+                            </span>
+                          )}
+                        </div>
+                        {it.uncertainties && it.uncertainties.length > 0 && (
+                          <p className="text-[10px] text-amber-700 flex items-center gap-1">
+                            <Info className="h-3 w-3" />
+                            <span>Lưu ý: {it.uncertainties.join(", ")}</span>
+                          </p>
                         )}
                       </div>
-                      {it.uncertainties && it.uncertainties.length > 0 && (
-                        <p className="text-[10px] text-amber-700 flex items-center gap-1">
-                          <Info className="h-3 w-3" />
-                          <span>Lưu ý: {it.uncertainties.join(", ")}</span>
-                        </p>
-                      )}
+
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            value={it.portionG}
+                            onChange={(e) => handlePortionChange(it.id, e.target.value)}
+                            className="w-16 rounded-lg border border-stone-200 px-2 py-1 text-xs text-center font-bold text-stone-800 focus:border-emerald-500 focus:outline-none"
+                            min="0"
+                            step="5"
+                          />
+                          <span className="text-xs text-stone-500">g</span>
+                        </div>
+
+                        <div className="text-right min-w-[70px]">
+                          <span className="text-xs font-bold text-stone-900">{round(it.nutrition.calories, 0)} kcal</span>
+                          <p className="text-[10px] text-emerald-600">{round(it.nutrition.protein, 1)}g P</p>
+                        </div>
+
+                        <button
+                          onClick={() => handleRemoveItem(it.id)}
+                          className="rounded-lg p-1 text-stone-400 hover:bg-rose-50 hover:text-rose-600 transition"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          value={it.portionG}
-                          onChange={(e) => handlePortionChange(it.id, e.target.value)}
-                          className="w-16 rounded-lg border border-stone-200 px-2 py-1 text-xs text-center font-bold text-stone-800 focus:border-emerald-500 focus:outline-none"
-                          min="0"
-                          step="5"
-                        />
-                        <span className="text-xs text-stone-500">g</span>
-                      </div>
+                    {/* Metabolic Indicators & Clarification row */}
+                    {metabolicPrefs.enabled && (
+                      <div className="pt-1.5 border-t border-stone-100 flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {/* Sugar Classification Badge */}
+                          {it.sugarClassification === "NO_KNOWN_SUGAR" && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200/60">
+                              🍃 Không đường thêm (0g)
+                            </span>
+                          )}
+                          {it.sugarClassification === "NATURAL_SUGAR" && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700 border border-teal-200/60">
+                              🍎 Đường tự nhiên (~{it.totalSugarG || 0}g)
+                            </span>
+                          )}
+                          {(it.sugarClassification === "ADDED_SUGAR" || it.sugarClassification === "BOTH_NATURAL_AND_ADDED") && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 border border-amber-300">
+                              🍬 Đường thêm: +{it.addedSugarG || 0}g
+                            </span>
+                          )}
+                          {it.sugarClassification === "UNKNOWN" && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600">
+                              ❓ Chưa rõ đường
+                            </span>
+                          )}
 
-                      <div className="text-right min-w-[70px]">
-                        <span className="text-xs font-bold text-stone-900">{round(it.nutrition.calories, 0)} kcal</span>
-                        <p className="text-[10px] text-emerald-600">{round(it.nutrition.protein, 1)}g P</p>
-                      </div>
+                          {/* GI Badge */}
+                          {it.giCategory === "high" && (
+                            <span className="inline-flex items-center gap-0.5 rounded-md bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 border border-rose-200">
+                              ⚡ GI Cao ({it.giValue || 70}+)
+                            </span>
+                          )}
+                          {it.giCategory === "medium" && (
+                            <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 border border-amber-200">
+                              GI Vừa ({it.giValue || 56})
+                            </span>
+                          )}
+                          {it.giCategory === "low" && (
+                            <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
+                              GI Thấp ({it.giValue || 45})
+                            </span>
+                          )}
+                        </div>
 
-                      <button
-                        onClick={() => handleRemoveItem(it.id)}
-                        className="rounded-lg p-1 text-stone-400 hover:bg-rose-50 hover:text-rose-600 transition"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
+                        {/* Quick Sugar Adjustment Input */}
+                        <div className="flex items-center gap-1 text-[10px] text-stone-500">
+                          <span>Đường thêm:</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={it.addedSugarG ?? 0}
+                            onChange={(e) => handleUpdateAddedSugar(it.id, Number(e.target.value))}
+                            className="w-11 rounded border border-stone-200 px-1 py-0.5 text-center font-bold text-stone-800 focus:border-emerald-500 focus:outline-none"
+                          />
+                          <span>g</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Clarification prompt if available */}
+                    {metabolicPrefs.enabled && it.clarificationQuestion && (
+                      <div className="rounded-xl bg-amber-50/80 p-2.5 border border-amber-200 text-xs text-amber-900 space-y-1.5">
+                        <div className="flex items-center gap-1.5 font-semibold text-[11px]">
+                          <HelpCircle className="h-3.5 w-3.5 text-amber-600" />
+                          <span>{it.clarificationQuestion}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleQuickClarification(it.id, "NO_KNOWN_SUGAR", 0)}
+                            className="rounded-lg bg-white border border-amber-300 px-2 py-1 text-[10px] font-bold text-emerald-700 hover:bg-emerald-50 transition"
+                          >
+                            Không đường / Đen đá (0g)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickClarification(it.id, "BOTH_NATURAL_AND_ADDED", 5)}
+                            className="rounded-lg bg-white border border-amber-300 px-2 py-1 text-[10px] font-bold text-amber-700 hover:bg-amber-50 transition"
+                          >
+                            Ít ngọt (+5g)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickClarification(it.id, "BOTH_NATURAL_AND_ADDED", 15)}
+                            className="rounded-lg bg-white border border-amber-300 px-2 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-50 transition"
+                          >
+                            Chuẩn ngọt (+15g)
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -797,6 +1112,146 @@ export function MealLoggerModal({
                   <p className="font-bold text-teal-400">{round(totalFiber, 1)}g</p>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Pre-Save Metabolic Guardrail Check */}
+          {metabolicPrefs.enabled && currentMealMetabolic && items.length > 0 && (
+            <div className="rounded-2xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/50 via-white to-amber-50/30 p-4 space-y-3">
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-white">
+                    <HeartPulse className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-stone-900">
+                      Đánh giá chuyển hóa & Đường / GI trước khi lưu
+                    </h4>
+                    <p className="text-[10px] text-stone-500">
+                      Chế độ: {metabolicPrefs.strictness === "gentle" ? "Nhẹ nhàng" : metabolicPrefs.strictness === "strict" ? "Nghiêm ngặt" : "Cân bằng"} • Mục tiêu: {metabolicPrefs.dailyAddedSugarLimitG}g đường thêm
+                    </p>
+                  </div>
+                </div>
+
+                {/* Severity pill */}
+                {currentMealMetabolic.riskSeverity === "LOW_CONCERN" && (
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold text-emerald-800 border border-emerald-300">
+                    ✅ Chuyển hóa an toàn
+                  </span>
+                )}
+                {currentMealMetabolic.riskSeverity === "INFORMATION" && (
+                  <span className="rounded-full bg-blue-100 px-2.5 py-1 text-[10px] font-bold text-blue-800 border border-blue-300">
+                    ℹ️ Ghi nhận chuyển hóa
+                  </span>
+                )}
+                {currentMealMetabolic.riskSeverity === "CAUTION" && (
+                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold text-amber-800 border border-amber-300">
+                    ⚠️ Lưu ý đường / GI
+                  </span>
+                )}
+                {currentMealMetabolic.riskSeverity === "HIGH_CONCERN" && (
+                  <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[10px] font-bold text-rose-800 border border-rose-300 animate-pulse">
+                    🚨 Vượt ngưỡng đường thêm
+                  </span>
+                )}
+              </div>
+
+              {/* Metrics grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-center">
+                <div className="rounded-xl bg-white p-2 border border-stone-200 shadow-xs">
+                  <span className="text-[10px] text-stone-500">Đường thêm bữa này</span>
+                  <p className="text-sm font-bold text-stone-900">
+                    +{currentMealMetabolic.mealAddedSugarG}g
+                  </p>
+                </div>
+                <div className="rounded-xl bg-white p-2 border border-stone-200 shadow-xs">
+                  <span className="text-[10px] text-stone-500">Tích lũy cả ngày</span>
+                  <p className={`text-sm font-bold ${
+                    currentMealMetabolic.cumulativeAddedSugarStatus === "EXCEEDED"
+                      ? "text-rose-600"
+                      : currentMealMetabolic.cumulativeAddedSugarStatus === "APPROACHING"
+                      ? "text-amber-600"
+                      : "text-emerald-700"
+                  }`}>
+                    {currentMealMetabolic.newProjectedDailyAddedSugarG} / {metabolicPrefs.dailyAddedSugarLimitG}g
+                  </p>
+                </div>
+                <div className="rounded-xl bg-white p-2 border border-stone-200 shadow-xs">
+                  <span className="text-[10px] text-stone-500">Tải đường huyết (GL)</span>
+                  <p className="text-sm font-bold text-stone-900">
+                    {currentMealMetabolic.mealGlValue} (
+                    {currentMealMetabolic.mealGlCategory === "low"
+                      ? "Thấp"
+                      : currentMealMetabolic.mealGlCategory === "medium"
+                      ? "Vừa"
+                      : "Cao"}
+                    )
+                  </p>
+                </div>
+                <div className="rounded-xl bg-white p-2 border border-stone-200 shadow-xs">
+                  <span className="text-[10px] text-stone-500">Khoảng cách bữa ăn</span>
+                  <p className="text-sm font-bold text-stone-900">
+                    {currentMealMetabolic.minutesSincePreviousMeal !== undefined
+                      ? `${Math.round(currentMealMetabolic.minutesSincePreviousMeal / 60 * 10) / 10}h`
+                      : "Bữa đầu ngày"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Added Sugar Progress Bar */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px] text-stone-500 font-medium">
+                  <span>Hạn mức đường thêm (WHO/Metabolic target):</span>
+                  <span>{Math.round((currentMealMetabolic.newProjectedDailyAddedSugarG / (metabolicPrefs.dailyAddedSugarLimitG || 25)) * 100)}%</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-stone-200">
+                  <div
+                    className={`h-full transition-all duration-300 ${
+                      currentMealMetabolic.cumulativeAddedSugarStatus === "EXCEEDED"
+                        ? "bg-rose-500"
+                        : currentMealMetabolic.cumulativeAddedSugarStatus === "APPROACHING"
+                        ? "bg-amber-500"
+                        : "bg-emerald-500"
+                    }`}
+                    style={{
+                      width: `${Math.min(100, Math.round((currentMealMetabolic.newProjectedDailyAddedSugarG / (metabolicPrefs.dailyAddedSugarLimitG || 25)) * 100))}%`,
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Warnings and Constructive Tips */}
+              {(currentMealMetabolic.warnings.length > 0 || currentMealMetabolic.constructiveAlternatives.length > 0) && (
+                <div className="space-y-2 pt-1 text-xs">
+                  {currentMealMetabolic.warnings.map((w, idx) => (
+                    <div
+                      key={`warn-${idx}`}
+                      className="flex items-start gap-2 rounded-xl bg-amber-50/90 p-2.5 text-amber-900 border border-amber-200"
+                    >
+                      <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <span className="font-bold">{w.title}</span>
+                        <p className="text-[11px] leading-relaxed text-amber-800">{w.message}</p>
+                      </div>
+                    </div>
+                  ))}
+
+                  {currentMealMetabolic.constructiveAlternatives.length > 0 && (
+                    <div className="flex items-start gap-2 rounded-xl bg-emerald-50/80 p-2.5 text-emerald-950 border border-emerald-200">
+                      <Sparkles className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <span className="font-bold">Gợi ý tối ưu chuyển hóa:</span>
+                        <ul className="list-disc list-inside text-[11px] space-y-0.5 text-emerald-900">
+                          {currentMealMetabolic.constructiveAlternatives.map((alt, idx) => (
+                            <li key={`alt-${idx}`}>{alt}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
