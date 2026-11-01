@@ -34,6 +34,11 @@ import {
 } from "@/lib/metabolic";
 import type { CoachingInsight } from "@/lib/coaching";
 import { round } from "@/lib/nutrition";
+import {
+  getCurrentMealTimeCategory,
+  MEAL_CATEGORY_INFO,
+  SUGGESTED_DISHES,
+} from "@/lib/data/mealSuggestionsData";
 
 interface DashboardTabProps {
   profile: StoredProfile;
@@ -520,6 +525,53 @@ export function DashboardTab({
 
         {/* Right Column: Coaching Insights & Weight Snapshot */}
         <aside className="space-y-6">
+          {/* Meal Suggestions Widget for Current Time */}
+          {(() => {
+            const currentCat = getCurrentMealTimeCategory();
+            const currentCatInfo = MEAL_CATEGORY_INFO[currentCat];
+            const topDishes = SUGGESTED_DISHES.filter((d) => d.category === currentCat).slice(0, 2);
+
+            return (
+              <div className="rounded-3xl border border-emerald-200/90 bg-gradient-to-br from-emerald-500/10 via-white to-lime-500/10 p-5 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-emerald-900 font-bold text-xs">
+                    <Sparkles className="h-4 w-4 text-emerald-600" />
+                    <span>Gợi ý cho {currentCatInfo.label}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTab("suggestions")}
+                    className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline flex items-center gap-0.5"
+                  >
+                    Xem tất cả ({currentCatInfo.timeRange}) →
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {topDishes.map((dish) => (
+                    <div
+                      key={dish.id}
+                      onClick={() => onSelectTab("suggestions")}
+                      className="flex items-center justify-between p-2.5 rounded-2xl bg-white border border-stone-200/80 hover:border-emerald-400 shadow-sm cursor-pointer transition group"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-xl group-hover:scale-110 transition-transform">{dish.emoji}</span>
+                        <div>
+                          <p className="text-xs font-bold text-stone-900 line-clamp-1 group-hover:text-emerald-700 transition-colors">
+                            {dish.name}
+                          </p>
+                          <p className="text-[10px] text-stone-500">
+                            {dish.calories} kcal • {dish.protein}g đạm • {dish.prepTime}
+                          </p>
+                        </div>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-stone-400 group-hover:text-emerald-600 transition" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Coaching Advice Card */}
           <div className="rounded-3xl border border-emerald-100 bg-emerald-50/80 p-5 shadow-sm">
             <div className="flex items-center gap-2 text-emerald-800">

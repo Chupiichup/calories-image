@@ -12,11 +12,13 @@ import {
   ShieldCheck,
   LogIn,
   RefreshCw,
+  Sparkles,
 } from "lucide-react";
 
 export type TabType =
   | "dashboard"
   | "log-meal"
+  | "suggestions"
   | "diary"
   | "history"
   | "weight"
@@ -45,6 +47,7 @@ export function Navigation({
   const navItems: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: "dashboard", label: "Tổng quan", icon: LayoutDashboard },
     { id: "log-meal", label: "Ghi nhận bữa ăn", icon: Camera },
+    { id: "suggestions", label: "Gợi ý món ăn", icon: Sparkles },
     { id: "diary", label: "Nhật ký thực phẩm", icon: BookOpen },
     { id: "history", label: "Lịch sử dinh dưỡng", icon: History },
     { id: "weight", label: "Cân nặng", icon: Scale },

@@ -21,6 +21,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { SEED_FOODS, searchFoods, type FoodItem } from "@/lib/data/seedFoods";
+import { SUGGESTED_DISHES } from "@/lib/data/mealSuggestionsData";
 import { scaleNutritionValues, round, type NutritionValues } from "@/lib/nutrition";
 import {
   formatToVietnamDateTimeLocal,
@@ -42,6 +43,15 @@ import {
 interface MealLoggerModalProps {
   isOpen: boolean;
   initialMode: "photo" | "manual";
+  prefilledMealType?: "breakfast" | "lunch" | "dinner" | "snack";
+  prefilledItems?: Array<{
+    foodName: string;
+    portionG: number;
+    nutrition: NutritionValues;
+    addedSugarG?: number;
+    totalSugarG?: number;
+    giValue?: number;
+  }>;
   onClose: () => void;
   onSaveMeal: (mealData: {
     mealType: "breakfast" | "lunch" | "dinner" | "snack";
@@ -93,11 +103,15 @@ type EditableItem = {
 export function MealLoggerModal({
   isOpen,
   initialMode,
+  prefilledMealType,
+  prefilledItems,
   onClose,
   onSaveMeal,
 }: MealLoggerModalProps) {
   const [mode, setMode] = useState<"photo" | "manual">(initialMode);
-  const [mealType, setMealType] = useState<"breakfast" | "lunch" | "dinner" | "snack">("lunch");
+  const [mealType, setMealType] = useState<"breakfast" | "lunch" | "dinner" | "snack">(
+    prefilledMealType || "lunch",
+  );
   const [eatenAtLocal, setEatenAtLocal] = useState<string>(() => formatToVietnamDateTimeLocal(new Date()));
   const [notes, setNotes] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -125,6 +139,33 @@ export function MealLoggerModal({
 
   React.useEffect(() => {
     if (isOpen) {
+      if (prefilledMealType) {
+        setMealType(prefilledMealType);
+      }
+      if (prefilledItems && prefilledItems.length > 0) {
+        const loaded: EditableItem[] = prefilledItems.map((pi, idx) => {
+          const portion = pi.portionG > 0 ? pi.portionG : 100;
+          return {
+            id: `prefilled-${Date.now()}-${idx}`,
+            foodName: pi.foodName,
+            portionG: portion,
+            baseNutritionPer100g: {
+              calories: (pi.nutrition.calories / portion) * 100,
+              protein: (pi.nutrition.protein / portion) * 100,
+              carbs: (pi.nutrition.carbs / portion) * 100,
+              fat: (pi.nutrition.fat / portion) * 100,
+              fiber: (pi.nutrition.fiber / portion) * 100,
+            },
+            nutrition: pi.nutrition,
+            isAiEstimated: false,
+            addedSugarG: pi.addedSugarG ?? 0,
+            totalSugarG: pi.totalSugarG ?? 0,
+            sugarClassification: (pi.addedSugarG ?? 0) > 0 ? "ADDED_SUGAR" : "NO_KNOWN_SUGAR",
+            giValue: pi.giValue,
+          };
+        });
+        setItems(loaded);
+      }
       if (initialMode === "manual") {
         setIsSearching(true);
       }
@@ -955,6 +996,66 @@ export function MealLoggerModal({
                 <span>Thêm món khác</span>
               </button>
             </div>
+
+            {/* Quick Suggestions for Current Meal Type */}
+            {(() => {
+              const mealDishes = SUGGESTED_DISHES.filter((d) =>
+                mealType === "snack"
+                  ? d.category === "snack" || d.category === "afternoon"
+                  : d.category === mealType,
+              ).slice(0, 4);
+
+              return (
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+                  <span className="shrink-0 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200/80 px-2 py-1 rounded-lg flex items-center gap-1">
+                    <Sparkles className="h-2.5 w-2.5 text-emerald-600" />
+                    Gợi ý nhanh:
+                  </span>
+                  {mealDishes.map((dish) => (
+                    <button
+                      key={dish.id}
+                      type="button"
+                      onClick={() => {
+                        const defaultG = 200;
+                        const newItem: EditableItem = {
+                          id: `sug-${Date.now()}-${dish.id}`,
+                          foodName: dish.name,
+                          portionG: defaultG,
+                          baseNutritionPer100g: {
+                            calories: (dish.calories / defaultG) * 100,
+                            protein: (dish.protein / defaultG) * 100,
+                            carbs: (dish.carbohydrates / defaultG) * 100,
+                            fat: (dish.fat / defaultG) * 100,
+                            fiber: (dish.fiber / defaultG) * 100,
+                          },
+                          nutrition: {
+                            calories: dish.calories,
+                            protein: dish.protein,
+                            carbs: dish.carbohydrates,
+                            fat: dish.fat,
+                            fiber: dish.fiber,
+                          },
+                          isAiEstimated: false,
+                          sugarClassification: dish.addedSugar > 0 ? "ADDED_SUGAR" : "NO_KNOWN_SUGAR",
+                          addedSugarG: dish.addedSugar,
+                          totalSugarG: dish.addedSugar,
+                          notes: "Món gợi ý theo thời điểm",
+                        };
+                        setItems((prev) => [...prev, newItem]);
+                      }}
+                      className="shrink-0 rounded-xl bg-white border border-stone-200 hover:border-emerald-400 hover:bg-emerald-50/50 px-2.5 py-1 text-[11px] font-medium text-stone-700 transition flex items-center gap-1.5 shadow-sm active:scale-95"
+                      title="Bấm để thêm ngay món này"
+                    >
+                      <span>{dish.emoji}</span>
+                      <span className="truncate max-w-[120px] font-semibold">{dish.name}</span>
+                      <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200/60">
+                        {dish.calories}kcal
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* Manual Search Dropdown */}
             {isSearching && (

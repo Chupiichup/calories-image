@@ -621,9 +621,10 @@ export const repository = {
       metabolicNotes?: string;
     }>;
   }): Promise<StoredMeal> {
-    const mealId = `meal-${Date.now()}`;
+    const randSuffix = Math.random().toString(36).substring(2, 7);
+    const mealId = `meal-${Date.now()}-${randSuffix}`;
     const newItems: StoredMealItem[] = input.items.map((it, idx) => ({
-      id: `mi-${Date.now()}-${idx}`,
+      id: `mi-${Date.now()}-${idx}-${randSuffix}`,
       mealId,
       foodId: it.foodId,
       foodNameSnapshot: it.foodName,

@@ -28,6 +28,7 @@ interface DiaryTabProps {
   onDateChange: (date: string) => void;
   onOpenMealLog: (mode: "photo" | "manual") => void;
   onDeleteMeal: (mealId: string) => Promise<void>;
+  onViewSuggestions?: (category: "breakfast" | "lunch" | "afternoon" | "dinner" | "snack") => void;
   onUpdateMeal?: (
     mealId: string,
     updates: {
@@ -45,6 +46,7 @@ export function DiaryTab({
   onDateChange,
   onOpenMealLog,
   onDeleteMeal,
+  onViewSuggestions,
   onUpdateMeal,
 }: DiaryTabProps) {
   const [editingMealId, setEditingMealId] = useState<string | null>(null);
@@ -183,13 +185,26 @@ export function DiaryTab({
                     {round(groupCalories, 0)} kcal • {round(groupProtein, 1)}g đạm
                   </span>
                 </div>
-                <button
-                  onClick={() => onOpenMealLog("photo")}
-                  className="flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>Thêm món</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {onViewSuggestions && (
+                    <button
+                      type="button"
+                      onClick={() => onViewSuggestions(groupKey === "snack" ? "snack" : (groupKey as any))}
+                      className="flex items-center gap-1 rounded-xl bg-stone-100 hover:bg-emerald-50 hover:text-emerald-700 px-2.5 py-1 text-xs font-semibold text-stone-600 transition"
+                      title="Xem các món gợi ý phù hợp cho bữa này"
+                    >
+                      <Sparkles className="h-3 w-3 text-emerald-600" />
+                      <span>Gợi ý món</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onOpenMealLog("photo")}
+                    className="flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Thêm món</span>
+                  </button>
+                </div>
               </div>
 
               {group.meals.length === 0 ? (

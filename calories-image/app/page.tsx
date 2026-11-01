@@ -8,6 +8,7 @@ import { HistoryTab } from "@/app/components/HistoryTab";
 import { WeightTab } from "@/app/components/WeightTab";
 import { ProfileTab } from "@/app/components/ProfileTab";
 import { SettingsTab } from "@/app/components/SettingsTab";
+import { MealSuggestionsTab } from "@/app/components/MealSuggestionsTab";
 import { MealLoggerModal } from "@/app/components/MealLoggerModal";
 import { AuthModal } from "@/app/components/AuthModal";
 import {
@@ -18,6 +19,8 @@ import {
   type StoredMeal,
   type StoredWeightEntry,
 } from "@/lib/db/repository";
+import { type MetabolicPreferences } from "@/lib/metabolic";
+import { type MealTimeCategory, type SuggestedDish } from "@/lib/data/mealSuggestionsData";
 import { generateNutritionCoachingInsights } from "@/lib/coaching";
 import { isSupabaseConfigured } from "@/lib/env";
 import { createClient } from "@/lib/supabase/client";
@@ -25,6 +28,14 @@ import { createClient } from "@/lib/supabase/client";
 export default function Home() {
   const [currentTab, setCurrentTab] = useState<TabType>("dashboard");
   const [selectedDate, setSelectedDate] = useState<string>("");
+
+  // Suggestions & metabolic state
+  const [metabolicPrefs, setMetabolicPrefs] = useState<MetabolicPreferences | null>(null);
+  const [suggestionsCategory, setSuggestionsCategory] = useState<MealTimeCategory | undefined>(undefined);
+  const [prefilledMealData, setPrefilledMealData] = useState<{
+    mealType?: "breakfast" | "lunch" | "dinner" | "snack";
+    items?: any[];
+  } | null>(null);
 
   // Current authenticated user state
   const [currentUser, setCurrentUser] = useState<{ id: string; email?: string } | null>(null);
@@ -83,6 +94,9 @@ export default function Home() {
 
       const weights = await repository.getWeightEntries();
       setWeightEntries(weights);
+
+      const mPrefs = await repository.getMetabolicPreferences();
+      if (mPrefs) setMetabolicPrefs(mPrefs);
     } catch (err) {
       console.error("Error loading nutrition coach data:", err);
     } finally {
@@ -264,6 +278,72 @@ export default function Home() {
     setGoal(updatedG);
   };
 
+  // Handler: Open Suggestions Tab with optional initial category
+  const handleOpenSuggestions = (cat?: MealTimeCategory) => {
+    setSuggestionsCategory(cat);
+    setCurrentTab("suggestions");
+  };
+
+  // Handler: Log Suggested Dish (Quick 1-click or customize in modal)
+  const handleLogSuggestedDish = async (
+    dish: SuggestedDish,
+    options?: { customizeFirst?: boolean },
+  ) => {
+    const mealType: "breakfast" | "lunch" | "dinner" | "snack" =
+      dish.category === "afternoon" ? "snack" : dish.category;
+
+    if (options?.customizeFirst) {
+      setPrefilledMealData({
+        mealType,
+        items: [
+          {
+            foodName: dish.name,
+            portionG: 250,
+            nutrition: {
+              calories: dish.calories,
+              protein: dish.protein,
+              carbs: dish.carbohydrates,
+              fat: dish.fat,
+              fiber: dish.fiber,
+            },
+            addedSugarG: dish.addedSugar,
+            totalSugarG: dish.addedSugar,
+          },
+        ],
+      });
+      setMealLoggerMode("manual");
+      setIsMealLoggerOpen(true);
+    } else {
+      // 1-click quick log into today's diary
+      await repository.saveMeal({
+        mealType,
+        eatenAt: new Date().toISOString(),
+        notes: `Gợi ý theo thời điểm: ${dish.name}`,
+        analysisStatus: "manual",
+        items: [
+          {
+            foodName: dish.name,
+            portionG: 250,
+            nutrition: {
+              calories: dish.calories,
+              protein: dish.protein,
+              carbs: dish.carbohydrates,
+              fat: dish.fat,
+              fiber: dish.fiber,
+            },
+            isAiEstimated: false,
+            nutritionSource: "Thực đơn gợi ý món theo thời điểm",
+            addedSugarG: dish.addedSugar,
+            totalSugarG: dish.addedSugar,
+          },
+        ],
+      });
+      const todayStr = getLocalDateString();
+      setSelectedDate(todayStr);
+      await loadData(todayStr);
+    }
+  };
+
   // Handler: Sign Out
   const handleSignOut = async () => {
     const supabase = createClient();
@@ -319,7 +399,27 @@ export default function Home() {
             recentWeights={weightEntries}
             coachingInsights={coachingInsights}
             onOpenMealLog={handleOpenMealLog}
-            onSelectTab={setCurrentTab}
+            onSelectTab={(tab) => {
+              if (tab === "suggestions") {
+                handleOpenSuggestions();
+              } else {
+                setCurrentTab(tab);
+              }
+            }}
+          />
+        )}
+
+        {currentTab === "suggestions" && (
+          <MealSuggestionsTab
+            initialCategory={suggestionsCategory}
+            profile={profile}
+            goal={goal}
+            metabolicPrefs={metabolicPrefs}
+            onLogDish={handleLogSuggestedDish}
+            onNavigateToDiary={() => {
+              setSelectedDate(getLocalDateString());
+              setCurrentTab("diary");
+            }}
           />
         )}
 
@@ -331,6 +431,7 @@ export default function Home() {
             onDateChange={setSelectedDate}
             onOpenMealLog={handleOpenMealLog}
             onDeleteMeal={handleDeleteMeal}
+            onViewSuggestions={(cat) => handleOpenSuggestions(cat as any)}
             onUpdateMeal={handleUpdateMeal}
           />
         )}
@@ -371,7 +472,12 @@ export default function Home() {
       <MealLoggerModal
         isOpen={isMealLoggerOpen}
         initialMode={mealLoggerMode}
-        onClose={() => setIsMealLoggerOpen(false)}
+        prefilledMealType={prefilledMealData?.mealType}
+        prefilledItems={prefilledMealData?.items}
+        onClose={() => {
+          setIsMealLoggerOpen(false);
+          setPrefilledMealData(null);
+        }}
         onSaveMeal={handleSaveMeal}
       />
 
