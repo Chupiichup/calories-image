@@ -648,19 +648,102 @@ export function MealLoggerModal({
 
   // Submit and Save Meal
   const handleConfirmSave = async () => {
-    if (items.length === 0) {
+    let currentItems = [...items];
+
+    // If no items have been added to the list yet, but user entered a search query,
+    // automatically add the best match (or custom dish) before saving!
+    if (currentItems.length === 0 && searchQuery.trim().length > 0) {
+      if (filteredFoods.length > 0) {
+        const food = filteredFoods[0];
+        const defaultG = food.defaultPortionG || 100;
+        const baseNutrition: NutritionValues = {
+          calories: food.caloriesPer100g,
+          protein: food.proteinPer100g,
+          carbs: food.carbsPer100g,
+          fat: food.fatPer100g,
+          fiber: food.fiberPer100g,
+        };
+        const scaledNutrition = scaleNutritionValues({
+          values: baseNutrition,
+          portionG: defaultG,
+          referenceG: 100,
+        });
+        const metabolic = resolveItemMetabolicDetails({
+          foodName: food.name,
+          portionG: defaultG,
+          carbsG: scaledNutrition.carbs,
+        });
+        currentItems = [
+          {
+            id: `manual-${Date.now()}`,
+            foodId: food.id,
+            foodName: food.name,
+            portionG: defaultG,
+            baseNutritionPer100g: baseNutrition,
+            nutrition: scaledNutrition,
+            isAiEstimated: false,
+            sugarClassification: metabolic.sugarClassification,
+            addedSugarG: metabolic.addedSugarG,
+            totalSugarG: metabolic.totalSugarG,
+            giValue: metabolic.giValue,
+            giCategory: metabolic.giCategory,
+            glValue: metabolic.glValue,
+            glCategory: metabolic.glCategory,
+            clarificationQuestion: metabolic.clarificationQuestion,
+            suggestedAlternative: metabolic.suggestedAlternative,
+          },
+        ];
+        setItems(currentItems);
+      } else {
+        const trimmed = searchQuery.trim();
+        const defaultG = 100;
+        const baseNutrition: NutritionValues = {
+          calories: 100,
+          protein: 5,
+          carbs: 10,
+          fat: 3,
+          fiber: 1,
+        };
+        const metabolic = resolveItemMetabolicDetails({
+          foodName: trimmed,
+          portionG: defaultG,
+          carbsG: 10,
+        });
+        currentItems = [
+          {
+            id: `manual-custom-${Date.now()}`,
+            foodName: trimmed,
+            portionG: defaultG,
+            baseNutritionPer100g: baseNutrition,
+            nutrition: baseNutrition,
+            isAiEstimated: false,
+            sugarClassification: metabolic.sugarClassification,
+            addedSugarG: metabolic.addedSugarG,
+            totalSugarG: metabolic.totalSugarG,
+            giValue: metabolic.giValue,
+            giCategory: metabolic.giCategory,
+            glValue: metabolic.glValue,
+            glCategory: metabolic.glCategory,
+            notes: "Món tự nhập thủ công",
+          },
+        ];
+        setItems(currentItems);
+      }
+    }
+
+    if (currentItems.length === 0) {
       setAnalysisError("Vui lòng thêm ít nhất một món ăn trước khi lưu.");
       return;
     }
 
-    const hasAi = items.some((it) => it.isAiEstimated);
+    const hasAi = currentItems.some((it) => it.isAiEstimated);
 
     await onSaveMeal({
       mealType,
       eatenAt: vietnamDateTimeLocalToIso(eatenAtLocal),
       notes,
       analysisStatus: hasAi ? "ai_confirmed" : "manual",
-      items: items.map((it) => ({
+      items: currentItems.map((it) => ({
         foodId: it.foodId,
         foodName: it.foodName,
         portionG: typeof it.portionG === "number" && it.portionG > 0 ? it.portionG : 100,
@@ -1066,6 +1149,16 @@ export function MealLoggerModal({
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (filteredFoods.length > 0) {
+                          handleAddCatalogFood(filteredFoods[0]);
+                        } else if (searchQuery.trim().length > 0) {
+                          handleAddCustomFood(searchQuery.trim());
+                        }
+                      }
+                    }}
                     placeholder="Tìm món Việt (Cà phê không đường, phở bò, ức gà, bún chả, cơm tấm...)"
                     className="w-full rounded-xl border border-stone-200 bg-white py-2 pl-9 pr-8 text-xs focus:border-emerald-500 focus:outline-none shadow-sm"
                     autoFocus
@@ -1531,7 +1624,7 @@ export function MealLoggerModal({
           </button>
           <button
             onClick={handleConfirmSave}
-            disabled={items.length === 0}
+            disabled={items.length === 0 && !searchQuery.trim()}
             className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-md hover:bg-emerald-700 disabled:opacity-50 transition"
           >
             <Check className="h-4 w-4" />

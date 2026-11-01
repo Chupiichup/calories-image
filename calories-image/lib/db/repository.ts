@@ -446,11 +446,9 @@ export const repository = {
       } = await supabase.auth.getUser();
 
       if (user) {
-        // Calculate timezone-aware local start and end of day
-        const localStart = new Date(`${dateString}T00:00:00`);
-        const localEnd = new Date(`${dateString}T23:59:59.999`);
-        const start = isNaN(localStart.getTime()) ? `${dateString}T00:00:00.000Z` : localStart.toISOString();
-        const end = isNaN(localEnd.getTime()) ? `${dateString}T23:59:59.999Z` : localEnd.toISOString();
+        // Calculate timezone-aware local start and end of day strictly in Vietnam timezone (UTC+7)
+        const start = vietnamDateTimeLocalToIso(`${dateString}T00:00:00`);
+        const end = vietnamDateTimeLocalToIso(`${dateString}T23:59:59.999`);
 
         const { data: meals, error: mealsErr } = await supabase
           .from("meals")
@@ -465,6 +463,7 @@ export const repository = {
         }
 
         if (meals && !mealsErr) {
+          const currentLocalMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
           const rawMapped: StoredMeal[] = meals.map((m) => {
             const mappedItems = (m.meal_items || []).map((it: any) => ({
               id: it.id,
@@ -490,6 +489,17 @@ export const repository = {
               metabolicNotes: it.metabolic_notes || undefined,
             }));
 
+            // Defensive merge: If Supabase returned meal without items but localStorage has the saved items, keep local items!
+            const localMatch = currentLocalMeals.find(
+              (lm) => lm.id === m.id || (lm.eatenAt === m.eaten_at && lm.mealType === m.meal_type)
+            );
+            const finalItems =
+              mappedItems.length > 0
+                ? mappedItems
+                : localMatch?.items && localMatch.items.length > 0
+                ? localMatch.items
+                : [];
+
             return {
               id: m.id,
               userId: m.user_id,
@@ -498,7 +508,7 @@ export const repository = {
               notes: m.notes,
               analysisStatus: m.analysis_status,
               createdAt: m.created_at,
-              items: mappedItems,
+              items: finalItems,
             };
           });
 
@@ -509,7 +519,9 @@ export const repository = {
             supabase.from("meals").delete().in("id", duplicateIds).then();
           }
 
-          setStorage("meals", deduped);
+          // Merge this day's deduped meals with existing meals from other days so we don't wipe history!
+          const otherDays = currentLocalMeals.filter((m) => getLocalDateString(m.eatenAt) !== dateString);
+          setStorage("meals", [...deduped, ...otherDays]);
           return deduped;
         }
       }
@@ -518,8 +530,10 @@ export const repository = {
     const allMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
     const cleaned = allMeals.filter((m) => m.id !== "meal-1" && m.id !== "meal-2");
     const { unique: deduped } = deduplicateMealList(cleaned);
-    setStorage("meals", deduped);
-    return deduped.filter((m) => getLocalDateString(m.eatenAt) === dateString);
+    const otherDays = cleaned.filter((m) => getLocalDateString(m.eatenAt) !== dateString);
+    const dayMeals = deduped.filter((m) => getLocalDateString(m.eatenAt) === dateString);
+    setStorage("meals", [...dayMeals, ...otherDays]);
+    return dayMeals;
   },
 
   async getAllMeals(): Promise<StoredMeal[]> {
@@ -541,6 +555,7 @@ export const repository = {
         }
 
         if (meals && !mealsErr) {
+          const currentLocalMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
           const rawMapped: StoredMeal[] = meals.map((m) => {
             const mappedItems = (m.meal_items || []).map((it: any) => ({
               id: it.id,
@@ -559,12 +574,23 @@ export const repository = {
               sugarClassification: it.sugar_classification || "UNKNOWN",
               addedSugarG: it.added_sugar_g !== null && it.added_sugar_g !== undefined ? Number(it.added_sugar_g) : 0,
               totalSugarG: it.total_sugar_g !== null && it.total_sugar_g !== undefined ? Number(it.total_sugar_g) : 0,
-              giValue: it.gi_value ? Number(it.gi_value) : undefined,
+              giValue: it.giValue ? Number(it.gi_value) : undefined,
               giCategory: it.gi_category || "unknown",
               glValue: it.gl_value !== null && it.gl_value !== undefined ? Number(it.gl_value) : undefined,
               glCategory: it.gl_category || "unknown",
               metabolicNotes: it.metabolic_notes || undefined,
             }));
+
+            // Defensive merge: If remote Supabase returned 0 items but local storage has cached items, preserve local items!
+            const localMatch = currentLocalMeals.find(
+              (lm) => lm.id === m.id || (lm.eatenAt === m.eaten_at && lm.mealType === m.meal_type)
+            );
+            const finalItems =
+              mappedItems.length > 0
+                ? mappedItems
+                : localMatch?.items && localMatch.items.length > 0
+                ? localMatch.items
+                : [];
 
             return {
               id: m.id,
@@ -574,7 +600,7 @@ export const repository = {
               notes: m.notes,
               analysisStatus: m.analysis_status,
               createdAt: m.created_at,
-              items: mappedItems,
+              items: finalItems,
             };
           });
 
@@ -712,7 +738,26 @@ export const repository = {
 
             const { error: itemsErr } = await supabase.from("meal_items").insert(itemsToInsert);
             if (itemsErr) {
-              console.error("Supabase insert meal_items error:", itemsErr);
+              console.warn("Supabase insert meal_items with metabolic fields failed, falling back to base columns:", itemsErr);
+              // Fallback to base columns in case 003_metabolic_guardrails.sql hasn't been run on remote DB
+              const baseItems = itemsToInsert.map((it) => ({
+                meal_id: it.meal_id,
+                food_id: it.food_id,
+                food_name_snapshot: it.food_name_snapshot,
+                portion_g: it.portion_g,
+                calories: it.calories,
+                protein: it.protein,
+                carbs: it.carbs,
+                fat: it.fat,
+                fiber: it.fiber,
+                nutrition_source: it.nutrition_source,
+                is_ai_estimated: it.is_ai_estimated,
+                confidence: it.confidence,
+              }));
+              const { error: retryErr } = await supabase.from("meal_items").insert(baseItems);
+              if (retryErr) {
+                console.error("Supabase insert meal_items base columns also failed:", retryErr);
+              }
             }
           }
         }
