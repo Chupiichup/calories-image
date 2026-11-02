@@ -218,10 +218,15 @@ export default function Home() {
 
   // Handler: Save Meal
   const handleSaveMeal = async (mealData: any) => {
-    await repository.saveMeal(mealData);
-    const mealDate = getLocalDateString(mealData.eatenAt);
-    setSelectedDate(mealDate);
-    await loadData(mealDate);
+    try {
+      await repository.saveMeal(mealData);
+      const mealDate = getLocalDateString(mealData.eatenAt);
+      setSelectedDate(mealDate);
+      await loadData(mealDate, false);
+      setCurrentTab("diary");
+    } catch (err) {
+      console.error("Error saving meal:", err);
+    }
   };
 
   // Handler: Update Meal Time / Type
@@ -340,7 +345,8 @@ export default function Home() {
       });
       const todayStr = getLocalDateString();
       setSelectedDate(todayStr);
-      await loadData(todayStr);
+      await loadData(todayStr, false);
+      setCurrentTab("diary");
     }
   };
 

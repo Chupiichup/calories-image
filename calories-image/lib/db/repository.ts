@@ -222,63 +222,50 @@ function setStorage<T>(key: string, val: T): void {
   memoryStore.set(key, val);
 }
 
-// Helper to deduplicate meals that share identical food/calories and meal type within a short time window
+// Helper to deduplicate meals (e.g. from array merges or rapid double clicks)
 export function deduplicateMealList(meals: StoredMeal[]): { unique: StoredMeal[]; duplicateIds: string[] } {
   const unique: StoredMeal[] = [];
   const duplicateIds: string[] = [];
+  const seenIds = new Set<string>();
 
   for (const m of meals) {
+    if (!m || !m.id) continue;
+
+    // Direct ID collision
+    if (seenIds.has(m.id)) {
+      duplicateIds.push(m.id);
+      continue;
+    }
+
     const mTime = new Date(m.eatenAt).getTime();
     const mDay = getLocalDateString(m.eatenAt);
-    const mTotalCal = Math.round(
-      (m.items || []).reduce((acc, it) => acc + (Number(it.calories) || 0), 0)
-    );
     const mItemsSig = (m.items || [])
       .map((it) => `${it.foodNameSnapshot || (it as any).name || ""}_${Math.round(it.portionG || 0)}_${Math.round(it.calories || 0)}`)
       .sort()
       .join("|");
 
-    const isDup = unique.some((existing) => {
+    // Check for accidental rapid double-submit (< 5 seconds, same mealType and identical items)
+    const isRapidDoubleSubmit = unique.some((existing) => {
       if (existing.id === m.id) return true;
-
-      const existingDay = getLocalDateString(existing.eatenAt);
-      if (existingDay !== mDay) return false;
-
       if (existing.mealType !== m.mealType) return false;
+      if (getLocalDateString(existing.eatenAt) !== mDay) return false;
 
       const existingTime = new Date(existing.eatenAt).getTime();
       const timeDiffSec = Math.abs(mTime - existingTime) / 1000;
-
-      const existingTotalCal = Math.round(
-        (existing.items || []).reduce((acc, it) => acc + (Number(it.calories) || 0), 0)
-      );
+      if (timeDiffSec > 5) return false;
 
       const existingItemsSig = (existing.items || [])
         .map((it) => `${it.foodNameSnapshot || (it as any).name || ""}_${Math.round(it.portionG || 0)}_${Math.round(it.calories || 0)}`)
         .sort()
         .join("|");
 
-      // Match 1: Identical items signature
-      if (mItemsSig.length > 0 && mItemsSig === existingItemsSig) {
-        return true;
-      }
-
-      // Match 2: Same calories (> 0) and recorded within 2 hours
-      if (mTotalCal > 0 && mTotalCal === existingTotalCal && timeDiffSec < 7200) {
-        return true;
-      }
-
-      // Match 3: Recorded within 60 seconds with same mealType
-      if (timeDiffSec < 60 && mTotalCal === existingTotalCal) {
-        return true;
-      }
-
-      return false;
+      return mItemsSig.length > 0 && mItemsSig === existingItemsSig;
     });
 
-    if (isDup) {
+    if (isRapidDoubleSubmit) {
       duplicateIds.push(m.id);
     } else {
+      seenIds.add(m.id);
       unique.push(m);
     }
   }
@@ -512,12 +499,8 @@ export const repository = {
             };
           });
 
-          // Auto-deduplicate duplicate meals
-          const { unique: deduped, duplicateIds } = deduplicateMealList(rawMapped);
-          if (duplicateIds.length > 0) {
-            console.log(`Auto-cleaning ${duplicateIds.length} duplicate meals from Supabase...`);
-            supabase.from("meals").delete().in("id", duplicateIds).then();
-          }
+          // Deduplicate duplicate meals by ID or rapid double-submit
+          const { unique: deduped } = deduplicateMealList(rawMapped);
 
           // Merge this day's deduped meals with existing meals from other days so we don't wipe history!
           const otherDays = currentLocalMeals.filter((m) => getLocalDateString(m.eatenAt) !== dateString);
@@ -604,13 +587,8 @@ export const repository = {
             };
           });
 
-          // Auto-deduplicate duplicate meals
-          const { unique: deduped, duplicateIds } = deduplicateMealList(rawMapped);
-          if (duplicateIds.length > 0) {
-            console.log(`Auto-cleaning ${duplicateIds.length} duplicate meals from Supabase...`);
-            supabase.from("meals").delete().in("id", duplicateIds).then();
-          }
-
+          // Deduplicate duplicate meals by ID or rapid double-submit
+          const { unique: deduped } = deduplicateMealList(rawMapped);
           setStorage("meals", deduped);
           return deduped;
         }
