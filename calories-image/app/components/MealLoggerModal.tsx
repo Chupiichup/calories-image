@@ -22,6 +22,13 @@ import {
 } from "lucide-react";
 import { SEED_FOODS, searchFoods, type FoodItem } from "@/lib/data/seedFoods";
 import { SUGGESTED_DISHES } from "@/lib/data/mealSuggestionsData";
+import {
+  type PortionUnitOption,
+  resolveFoodPortionUnits,
+  getDefaultUnitOption,
+  calculateInitialPortionState,
+  getFoodPortionBadgeText,
+} from "@/lib/data/portionUnits";
 import { scaleNutritionValues, round, type NutritionValues } from "@/lib/nutrition";
 import {
   formatToVietnamDateTimeLocal,
@@ -83,6 +90,9 @@ type EditableItem = {
   foodId?: string;
   foodName: string;
   portionG: number | "";
+  unitOptions?: PortionUnitOption[];
+  selectedUnitId?: string;
+  unitQuantity?: number | "";
   baseNutritionPer100g: NutritionValues;
   nutrition: NutritionValues;
   isAiEstimated: boolean;
@@ -145,10 +155,14 @@ export function MealLoggerModal({
       if (prefilledItems && prefilledItems.length > 0) {
         const loaded: EditableItem[] = prefilledItems.map((pi, idx) => {
           const portion = pi.portionG > 0 ? pi.portionG : 100;
+          const pState = calculateInitialPortionState(pi.foodName, undefined, undefined, portion);
           return {
             id: `prefilled-${Date.now()}-${idx}`,
             foodName: pi.foodName,
             portionG: portion,
+            unitOptions: pState.unitOptions,
+            selectedUnitId: pState.selectedUnit.id,
+            unitQuantity: pState.unitQuantity,
             baseNutritionPer100g: {
               calories: (pi.nutrition.calories / portion) * 100,
               protein: (pi.nutrition.protein / portion) * 100,
@@ -317,6 +331,7 @@ export function MealLoggerModal({
       // Populate candidate items for user review & editing
       const detected: EditableItem[] = (data.candidates || []).map((c: any, idx: number) => {
         const portionG = c.portionG || 100;
+        const pState = calculateInitialPortionState(c.name, undefined, undefined, portionG);
         const baseNutrition = {
           calories: (c.calories / portionG) * 100,
           protein: (c.protein / portionG) * 100,
@@ -340,6 +355,9 @@ export function MealLoggerModal({
           foodId: c.standardizedName,
           foodName: c.name,
           portionG,
+          unitOptions: pState.unitOptions,
+          selectedUnitId: pState.selectedUnit.id,
+          unitQuantity: pState.unitQuantity,
           baseNutritionPer100g: baseNutrition,
           nutrition: {
             calories: c.calories,
@@ -381,6 +399,7 @@ export function MealLoggerModal({
             return {
               ...it,
               portionG: "",
+              unitQuantity: "",
               nutrition: { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 },
               addedSugarG: 0,
               totalSugarG: 0,
@@ -409,9 +428,15 @@ export function MealLoggerModal({
             aiGiCategory: it.giCategory,
           });
 
+          const currentUnit = (it.unitOptions || []).find((u) => u.id === it.selectedUnitId);
+          const unitQuantity = currentUnit
+            ? round(portionG / currentUnit.gramsPerUnit, 2)
+            : portionG;
+
           return {
             ...it,
             portionG,
+            unitQuantity,
             nutrition: {
               calories: round(it.baseNutritionPer100g.calories * ratio, 1),
               protein: round(it.baseNutritionPer100g.protein * ratio, 1),
@@ -429,6 +454,133 @@ export function MealLoggerModal({
           };
         }
         return it;
+      }),
+    );
+  };
+
+  // Handle quantity changes for the selected unit (e.g. 1 quả, 0.5 quả, 0.1 quả, 1.5 bát, 2 củ)
+  const handleUnitQuantityChange = (itemId: string, rawVal: string) => {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== itemId) return it;
+
+        const options = it.unitOptions || resolveFoodPortionUnits(it.foodName);
+        const currentUnit =
+          options.find((u) => u.id === it.selectedUnitId) || getDefaultUnitOption(options);
+
+        if (rawVal === "") {
+          return {
+            ...it,
+            unitQuantity: "",
+            portionG: "",
+            nutrition: { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 },
+            addedSugarG: 0,
+            totalSugarG: 0,
+            glValue: 0,
+          };
+        }
+
+        const qty = parseFloat(rawVal);
+        if (isNaN(qty)) return it;
+
+        const clampedQty = Math.max(0, qty);
+        const portionG = Math.max(0, round(clampedQty * currentUnit.gramsPerUnit, 1));
+        const ratio = portionG / 100;
+        const scaledCarbs = round(it.baseNutritionPer100g.carbs * ratio, 1);
+        const metabolic = resolveItemMetabolicDetails({
+          foodName: it.foodName,
+          portionG,
+          carbsG: scaledCarbs,
+          aiSugarClassification: it.sugarClassification,
+          aiEstimatedAddedSugarG:
+            typeof it.addedSugarG === "number" && typeof it.portionG === "number" && it.portionG > 0
+              ? round((it.addedSugarG / it.portionG) * portionG, 1)
+              : undefined,
+          aiEstimatedTotalSugarG:
+            typeof it.totalSugarG === "number" && typeof it.portionG === "number" && it.portionG > 0
+              ? round((it.totalSugarG / it.portionG) * portionG, 1)
+              : undefined,
+          aiGiEstimate: it.giValue,
+          aiGiCategory: it.giCategory,
+        });
+
+        return {
+          ...it,
+          unitQuantity: clampedQty,
+          portionG,
+          nutrition: {
+            calories: round(it.baseNutritionPer100g.calories * ratio, 1),
+            protein: round(it.baseNutritionPer100g.protein * ratio, 1),
+            carbs: scaledCarbs,
+            fat: round(it.baseNutritionPer100g.fat * ratio, 1),
+            fiber: round(it.baseNutritionPer100g.fiber * ratio, 1),
+          },
+          sugarClassification: metabolic.sugarClassification,
+          addedSugarG: metabolic.addedSugarG,
+          totalSugarG: metabolic.totalSugarG,
+          giValue: metabolic.giValue,
+          giCategory: metabolic.giCategory,
+          glValue: metabolic.glValue,
+          glCategory: metabolic.glCategory,
+        };
+      }),
+    );
+  };
+
+  // Handle switching unit (e.g. from "quả vừa (~200g)" to "quả to (~250g)" or "g")
+  const handleUnitChange = (itemId: string, newUnitId: string) => {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== itemId) return it;
+
+        const options = it.unitOptions || resolveFoodPortionUnits(it.foodName);
+        const prevUnit = options.find((u) => u.id === it.selectedUnitId);
+        const nextUnit = options.find((u) => u.id === newUnitId) || getDefaultUnitOption(options);
+
+        let newQty: number;
+        if (nextUnit.isGramUnit) {
+          // If switching to grams, quantity becomes current portion in grams
+          newQty = typeof it.portionG === "number" && it.portionG > 0 ? it.portionG : nextUnit.gramsPerUnit;
+        } else if (prevUnit && prevUnit.isGramUnit) {
+          // If switching from grams to natural unit, convert portion to unit count
+          const currentG = typeof it.portionG === "number" && it.portionG > 0 ? it.portionG : nextUnit.gramsPerUnit;
+          newQty = round(currentG / nextUnit.gramsPerUnit, 2);
+          if (newQty === 0) newQty = 1;
+        } else {
+          // Switching between natural units, retain current quantity
+          newQty = typeof it.unitQuantity === "number" && it.unitQuantity > 0 ? it.unitQuantity : 1;
+        }
+
+        const portionG = Math.max(0, round(newQty * nextUnit.gramsPerUnit, 1));
+        const ratio = portionG / 100;
+        const scaledCarbs = round(it.baseNutritionPer100g.carbs * ratio, 1);
+        const metabolic = resolveItemMetabolicDetails({
+          foodName: it.foodName,
+          portionG,
+          carbsG: scaledCarbs,
+          aiSugarClassification: it.sugarClassification,
+        });
+
+        return {
+          ...it,
+          selectedUnitId: nextUnit.id,
+          unitQuantity: newQty,
+          portionG,
+          nutrition: {
+            calories: round(it.baseNutritionPer100g.calories * ratio, 1),
+            protein: round(it.baseNutritionPer100g.protein * ratio, 1),
+            carbs: scaledCarbs,
+            fat: round(it.baseNutritionPer100g.fat * ratio, 1),
+            fiber: round(it.baseNutritionPer100g.fiber * ratio, 1),
+          },
+          sugarClassification: metabolic.sugarClassification,
+          addedSugarG: metabolic.addedSugarG,
+          totalSugarG: metabolic.totalSugarG,
+          giValue: metabolic.giValue,
+          giCategory: metabolic.giCategory,
+          glValue: metabolic.glValue,
+          glCategory: metabolic.glCategory,
+        };
       }),
     );
   };
@@ -502,7 +654,8 @@ export function MealLoggerModal({
 
   // Add food from manual catalog search
   const handleAddCatalogFood = (food: FoodItem) => {
-    const defaultG = food.defaultPortionG || 100;
+    const pState = calculateInitialPortionState(food.name, food.commonUnits, food.defaultPortionG);
+    const chosenPortionG = pState.portionG;
     const baseNutrition: NutritionValues = {
       calories: food.caloriesPer100g,
       protein: food.proteinPer100g,
@@ -512,12 +665,12 @@ export function MealLoggerModal({
     };
     const scaledNutrition = scaleNutritionValues({
       values: baseNutrition,
-      portionG: defaultG,
+      portionG: chosenPortionG,
       referenceG: 100,
     });
     const metabolic = resolveItemMetabolicDetails({
       foodName: food.name,
-      portionG: defaultG,
+      portionG: chosenPortionG,
       carbsG: scaledNutrition.carbs,
     });
 
@@ -525,7 +678,10 @@ export function MealLoggerModal({
       id: `manual-${Date.now()}`,
       foodId: food.id,
       foodName: food.name,
-      portionG: defaultG,
+      portionG: chosenPortionG,
+      unitOptions: pState.unitOptions,
+      selectedUnitId: pState.selectedUnit.id,
+      unitQuantity: pState.unitQuantity,
       baseNutritionPer100g: baseNutrition,
       nutrition: scaledNutrition,
       isAiEstimated: false,
@@ -549,7 +705,8 @@ export function MealLoggerModal({
   const handleAddCustomFood = (customName: string) => {
     const trimmed = customName.trim();
     if (!trimmed) return;
-    const defaultG = 100;
+    const pState = calculateInitialPortionState(trimmed);
+    const chosenPortionG = pState.portionG;
     const baseNutrition: NutritionValues = {
       calories: 100,
       protein: 5,
@@ -557,18 +714,26 @@ export function MealLoggerModal({
       fat: 3,
       fiber: 1,
     };
+    const scaledNutrition = scaleNutritionValues({
+      values: baseNutrition,
+      portionG: chosenPortionG,
+      referenceG: 100,
+    });
     const metabolic = resolveItemMetabolicDetails({
       foodName: trimmed,
-      portionG: defaultG,
-      carbsG: baseNutrition.carbs,
+      portionG: chosenPortionG,
+      carbsG: scaledNutrition.carbs,
     });
 
     const newItem: EditableItem = {
       id: `custom-${Date.now()}`,
       foodName: trimmed,
-      portionG: defaultG,
+      portionG: chosenPortionG,
+      unitOptions: pState.unitOptions,
+      selectedUnitId: pState.selectedUnit.id,
+      unitQuantity: pState.unitQuantity,
       baseNutritionPer100g: baseNutrition,
-      nutrition: { ...baseNutrition },
+      nutrition: scaledNutrition,
       isAiEstimated: false,
       sugarClassification: metabolic.sugarClassification,
       addedSugarG: metabolic.addedSugarG,
@@ -655,7 +820,8 @@ export function MealLoggerModal({
     if (currentItems.length === 0 && searchQuery.trim().length > 0) {
       if (filteredFoods.length > 0) {
         const food = filteredFoods[0];
-        const defaultG = food.defaultPortionG || 100;
+        const pState = calculateInitialPortionState(food.name, food.commonUnits, food.defaultPortionG);
+        const chosenPortionG = pState.portionG;
         const baseNutrition: NutritionValues = {
           calories: food.caloriesPer100g,
           protein: food.proteinPer100g,
@@ -665,12 +831,12 @@ export function MealLoggerModal({
         };
         const scaledNutrition = scaleNutritionValues({
           values: baseNutrition,
-          portionG: defaultG,
+          portionG: chosenPortionG,
           referenceG: 100,
         });
         const metabolic = resolveItemMetabolicDetails({
           foodName: food.name,
-          portionG: defaultG,
+          portionG: chosenPortionG,
           carbsG: scaledNutrition.carbs,
         });
         currentItems = [
@@ -678,7 +844,10 @@ export function MealLoggerModal({
             id: `manual-${Date.now()}`,
             foodId: food.id,
             foodName: food.name,
-            portionG: defaultG,
+            portionG: chosenPortionG,
+            unitOptions: pState.unitOptions,
+            selectedUnitId: pState.selectedUnit.id,
+            unitQuantity: pState.unitQuantity,
             baseNutritionPer100g: baseNutrition,
             nutrition: scaledNutrition,
             isAiEstimated: false,
@@ -696,7 +865,8 @@ export function MealLoggerModal({
         setItems(currentItems);
       } else {
         const trimmed = searchQuery.trim();
-        const defaultG = 100;
+        const pState = calculateInitialPortionState(trimmed);
+        const chosenPortionG = pState.portionG;
         const baseNutrition: NutritionValues = {
           calories: 100,
           protein: 5,
@@ -706,14 +876,17 @@ export function MealLoggerModal({
         };
         const metabolic = resolveItemMetabolicDetails({
           foodName: trimmed,
-          portionG: defaultG,
+          portionG: chosenPortionG,
           carbsG: 10,
         });
         currentItems = [
           {
             id: `manual-custom-${Date.now()}`,
             foodName: trimmed,
-            portionG: defaultG,
+            portionG: chosenPortionG,
+            unitOptions: pState.unitOptions,
+            selectedUnitId: pState.selectedUnit.id,
+            unitQuantity: pState.unitQuantity,
             baseNutritionPer100g: baseNutrition,
             nutrition: baseNutrition,
             isAiEstimated: false,
@@ -1100,10 +1273,15 @@ export function MealLoggerModal({
                       type="button"
                       onClick={() => {
                         const defaultG = 200;
+                        const pState = calculateInitialPortionState(dish.name, undefined, defaultG);
+                        const chosenPortionG = pState.portionG;
                         const newItem: EditableItem = {
                           id: `sug-${Date.now()}-${dish.id}`,
                           foodName: dish.name,
-                          portionG: defaultG,
+                          portionG: chosenPortionG,
+                          unitOptions: pState.unitOptions,
+                          selectedUnitId: pState.selectedUnit.id,
+                          unitQuantity: pState.unitQuantity,
                           baseNutritionPer100g: {
                             calories: (dish.calories / defaultG) * 100,
                             protein: (dish.protein / defaultG) * 100,
@@ -1111,13 +1289,17 @@ export function MealLoggerModal({
                             fat: (dish.fat / defaultG) * 100,
                             fiber: (dish.fiber / defaultG) * 100,
                           },
-                          nutrition: {
-                            calories: dish.calories,
-                            protein: dish.protein,
-                            carbs: dish.carbohydrates,
-                            fat: dish.fat,
-                            fiber: dish.fiber,
-                          },
+                          nutrition: scaleNutritionValues({
+                            values: {
+                              calories: (dish.calories / defaultG) * 100,
+                              protein: (dish.protein / defaultG) * 100,
+                              carbs: (dish.carbohydrates / defaultG) * 100,
+                              fat: (dish.fat / defaultG) * 100,
+                              fiber: (dish.fiber / defaultG) * 100,
+                            },
+                            portionG: chosenPortionG,
+                            referenceG: 100,
+                          }),
                           isAiEstimated: false,
                           sugarClassification: dish.addedSugar > 0 ? "ADDED_SUGAR" : "NO_KNOWN_SUGAR",
                           addedSugarG: dish.addedSugar,
@@ -1190,7 +1372,7 @@ export function MealLoggerModal({
                           </span>
                         </div>
                         <span className="shrink-0 font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded text-[11px] border border-emerald-200">
-                          +{f.defaultPortionG}g
+                          +{getFoodPortionBadgeText(f)}
                         </span>
                       </button>
                     ))
@@ -1249,42 +1431,121 @@ export function MealLoggerModal({
                         )}
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            value={it.portionG}
-                            onChange={(e) => handlePortionChange(it.id, e.target.value)}
-                            className="w-16 rounded-lg border border-stone-200 px-2 py-1 text-xs text-center font-bold text-stone-800 focus:border-emerald-500 focus:outline-none"
-                            min="0"
-                            step="5"
-                          />
-                          <span className="text-xs text-stone-500">g</span>
-                        </div>
+                      {(() => {
+                        const unitOpts = it.unitOptions || resolveFoodPortionUnits(it.foodName);
+                        const activeUnit =
+                          unitOpts.find((u) => u.id === it.selectedUnitId) ||
+                          getDefaultUnitOption(unitOpts);
+                        const isNatural = !activeUnit.isGramUnit;
 
-                        <div className="text-right min-w-[75px]">
-                          <span className="text-xs font-bold text-stone-900">{round(it.nutrition.calories, 0)} kcal</span>
-                          <div className="flex items-center justify-end gap-1.5">
-                            <span className="text-[10px] text-emerald-600 font-semibold">{round(it.nutrition.protein, 1)}g P</span>
-                            <button
-                              type="button"
-                              onClick={() => setEditingNutritionItemId(editingNutritionItemId === it.id ? null : it.id)}
-                              className="text-[10px] text-stone-400 hover:text-emerald-700 underline"
-                              title="Tùy chỉnh calo, đạm, carb, béo"
-                            >
-                              {editingNutritionItemId === it.id ? "Đóng" : "Sửa calo"}
-                            </button>
+                        const displayQty =
+                          it.unitQuantity !== undefined && it.unitQuantity !== ""
+                            ? it.unitQuantity
+                            : it.portionG !== ""
+                            ? (isNatural ? round(Number(it.portionG) / activeUnit.gramsPerUnit, 2) : it.portionG)
+                            : "";
+
+                        return (
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                            {/* Quantity + Unit Dropdown Box */}
+                            <div className="flex items-center gap-1.5 bg-stone-50 p-1 rounded-xl border border-stone-200 shadow-2xs">
+                              <input
+                                type="number"
+                                value={displayQty}
+                                onChange={(e) => handleUnitQuantityChange(it.id, e.target.value)}
+                                className="w-16 rounded-lg border border-stone-300 bg-white px-1.5 py-1 text-xs text-center font-extrabold text-stone-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                                min={isNatural ? "0.05" : "1"}
+                                step={isNatural ? "0.1" : "5"}
+                                placeholder={isNatural ? "1" : "100"}
+                                title={`Số lượng ${activeUnit.unitName}`}
+                              />
+
+                              <select
+                                value={activeUnit.id}
+                                onChange={(e) => handleUnitChange(it.id, e.target.value)}
+                                className="rounded-lg border border-stone-300 bg-white py-1 px-1.5 text-xs font-semibold text-stone-800 focus:border-emerald-500 focus:outline-none cursor-pointer max-w-[140px] truncate"
+                                title="Chọn đơn vị tính (Quả, Củ, Bát, Cái, Gam...)"
+                              >
+                                {unitOpts.map((u) => (
+                                  <option key={u.id} value={u.id}>
+                                    {u.shortLabel}
+                                  </option>
+                                ))}
+                              </select>
+
+                              {isNatural && typeof it.portionG === "number" && it.portionG > 0 && (
+                                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 shrink-0">
+                                  ={round(it.portionG, 0)}g
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Macro values & Actions */}
+                            <div className="flex items-center gap-2 justify-between sm:justify-end">
+                              <div className="text-right min-w-[75px]">
+                                <span className="text-xs font-bold text-stone-900">{round(it.nutrition.calories, 0)} kcal</span>
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <span className="text-[10px] text-emerald-600 font-semibold">{round(it.nutrition.protein, 1)}g P</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingNutritionItemId(editingNutritionItemId === it.id ? null : it.id)}
+                                    className="text-[10px] text-stone-400 hover:text-emerald-700 underline"
+                                    title="Tùy chỉnh calo, đạm, carb, béo"
+                                  >
+                                    {editingNutritionItemId === it.id ? "Đóng" : "Sửa calo"}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => handleRemoveItem(it.id)}
+                                className="rounded-lg p-1 text-stone-400 hover:bg-rose-50 hover:text-rose-600 transition"
+                                title="Xóa món này"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
                           </div>
-                        </div>
-
-                        <button
-                          onClick={() => handleRemoveItem(it.id)}
-                          className="rounded-lg p-1 text-stone-400 hover:bg-rose-50 hover:text-rose-600 transition"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
+                        );
+                      })()}
                     </div>
+
+                    {/* Quick Portion Chips for Natural Units (0.1, 0.5, 1, 1.5, 2) */}
+                    {(() => {
+                      const unitOpts = it.unitOptions || resolveFoodPortionUnits(it.foodName);
+                      const activeUnit =
+                        unitOpts.find((u) => u.id === it.selectedUnitId) ||
+                        getDefaultUnitOption(unitOpts);
+                      const isNatural = !activeUnit.isGramUnit;
+
+                      if (!isNatural) return null;
+
+                      const fractions = [0.1, 0.5, 1, 1.5, 2];
+                      const currentVal = Number(it.unitQuantity);
+
+                      return (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px]">
+                          <span className="text-stone-400 text-[10px] font-medium">Chọn nhanh:</span>
+                          {fractions.map((f) => {
+                            const isMatch = Math.abs(currentVal - f) < 0.01;
+                            return (
+                              <button
+                                key={f}
+                                type="button"
+                                onClick={() => handleUnitQuantityChange(it.id, String(f))}
+                                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition active:scale-95 ${
+                                  isMatch
+                                    ? "bg-emerald-600 text-white shadow-xs"
+                                    : "bg-stone-100 text-stone-600 hover:bg-emerald-100 hover:text-emerald-800"
+                                }`}
+                              >
+                                {f} {activeUnit.unitName}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
 
                     {/* Direct Nutrition & Macro Fine-Tuning */}
                     {editingNutritionItemId === it.id && (
