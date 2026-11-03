@@ -32,6 +32,7 @@ import {
   DEFAULT_METABOLIC_PREFERENCES,
   evaluateDailySugarStatus,
 } from "@/lib/metabolic";
+import { DailyActivityCard } from "./DailyActivityCard";
 import type { CoachingInsight } from "@/lib/coaching";
 import { round } from "@/lib/nutrition";
 import {
@@ -401,6 +402,11 @@ export function DashboardTab({
           </div>
         </section>
       )}
+
+      {/* Daily Physical Activity Tracking (Samsung Health & Health Connect) */}
+      <section>
+        <DailyActivityCard />
+      </section>
 
       {/* Main Grid: Coaching Advice & Recent Meals & Weight */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

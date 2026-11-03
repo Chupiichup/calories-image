@@ -88,6 +88,19 @@ export type StoredWeightEntry = {
   notes?: string;
 };
 
+export type StoredDailyActivity = {
+  id: string;
+  userId: string;
+  activityDate: string; // YYYY-MM-DD
+  timezone: string;
+  steps: number;
+  activeCaloriesKcal: number | null;
+  source: string;
+  syncedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 const DEFAULT_PROFILE: StoredProfile = {
   id: "user-default",
   email: "",
@@ -270,6 +283,10 @@ export function clearMealCache(): void {
   clearCachePrefix("all_meals");
 }
 
+export function clearActivityCache(): void {
+  clearCachePrefix("activity_");
+}
+
 export function clearAllMemoryCache(): void {
   memoryCache.clear();
   cachedAuthUser = null;
@@ -281,6 +298,7 @@ export const CACHE_TTL = {
   METABOLIC: 15 * 60 * 1000,  // 15 minutes
   WEIGHT: 5 * 60 * 1000,      // 5 minutes
   MEALS: 60 * 1000,           // 1 minute (auto-revalidates or invalidates on mutate)
+  ACTIVITY: 60 * 1000,        // 1 minute (auto-revalidates or invalidates on mutate)
 };
 
 // Cached Supabase User to prevent duplicate /auth/v1/user network requests
@@ -1180,6 +1198,172 @@ export const repository = {
       "weight_entries",
       current.filter((e) => e.id !== id),
     );
+  },
+
+  // 4. Daily Physical Activity Tracking (Samsung Health & Health Connect)
+  async getActivityForDate(dateString: string): Promise<StoredDailyActivity | null> {
+    const cacheKey = `activity_date_${dateString}`;
+    const cached = getCachedData<StoredDailyActivity>(cacheKey);
+    if (cached !== null) return cached;
+
+    const supabase = createClient();
+    if (supabase) {
+      const user = await getCachedUser(supabase);
+      if (user) {
+        const { data, error } = await supabase
+          .from("daily_activities")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("activity_date", dateString)
+          .maybeSingle();
+
+        if (data && !error) {
+          const act: StoredDailyActivity = {
+            id: data.id,
+            userId: data.user_id,
+            activityDate: data.activity_date,
+            timezone: data.timezone || "Asia/Ho_Chi_Minh",
+            steps: Number(data.steps) || 0,
+            activeCaloriesKcal: data.active_calories_kcal !== null ? Number(data.active_calories_kcal) : null,
+            source: data.source || "samsung_health",
+            syncedAt: data.synced_at || data.created_at,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at,
+          };
+          setCachedData(cacheKey, act, CACHE_TTL.ACTIVITY);
+          return act;
+        }
+      }
+    }
+
+    const all = getStorage<StoredDailyActivity[]>("daily_activities", []);
+    const match = all.find((a) => a.activityDate === dateString) || null;
+    if (match) {
+      setCachedData(cacheKey, match, CACHE_TTL.ACTIVITY);
+    }
+    return match;
+  },
+
+  async getRecentActivities(limitDays: number = 7): Promise<StoredDailyActivity[]> {
+    const cacheKey = `activity_recent_${limitDays}`;
+    const cached = getCachedData<StoredDailyActivity[]>(cacheKey);
+    if (cached) return cached;
+
+    const supabase = createClient();
+    if (supabase) {
+      const user = await getCachedUser(supabase);
+      if (user) {
+        const { data, error } = await supabase
+          .from("daily_activities")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("activity_date", { ascending: false })
+          .limit(limitDays);
+
+        if (data && !error && data.length > 0) {
+          const res: StoredDailyActivity[] = data.map((d: any) => ({
+            id: d.id,
+            userId: d.user_id,
+            activityDate: d.activity_date,
+            timezone: d.timezone || "Asia/Ho_Chi_Minh",
+            steps: Number(d.steps) || 0,
+            activeCaloriesKcal: d.active_calories_kcal !== null ? Number(d.active_calories_kcal) : null,
+            source: d.source || "samsung_health",
+            syncedAt: d.synced_at || d.created_at,
+            createdAt: d.created_at,
+            updatedAt: d.updated_at,
+          }));
+          setCachedData(cacheKey, res, CACHE_TTL.ACTIVITY);
+          return res;
+        }
+      }
+    }
+
+    const all = getStorage<StoredDailyActivity[]>("daily_activities", []);
+    const sorted = [...all].sort((a, b) => b.activityDate.localeCompare(a.activityDate)).slice(0, limitDays);
+    setCachedData(cacheKey, sorted, CACHE_TTL.ACTIVITY);
+    return sorted;
+  },
+
+  async saveActivity(input: {
+    activityDate: string;
+    steps: number;
+    activeCaloriesKcal?: number | null;
+    source?: string;
+    timezone?: string;
+    syncedAt?: string;
+  }): Promise<StoredDailyActivity> {
+    clearActivityCache();
+    const id = generateUUID();
+    const nowIso = new Date().toISOString();
+    const cleanedSteps = Math.max(0, Math.round(input.steps || 0));
+    const cleanedActiveCal =
+      input.activeCaloriesKcal !== null && input.activeCaloriesKcal !== undefined && !isNaN(Number(input.activeCaloriesKcal))
+        ? Math.max(0, Math.round(Number(input.activeCaloriesKcal) * 10) / 10)
+        : null;
+
+    const activityRecord: StoredDailyActivity = {
+      id,
+      userId: "demo-user-1",
+      activityDate: input.activityDate,
+      timezone: input.timezone || "Asia/Ho_Chi_Minh",
+      steps: cleanedSteps,
+      activeCaloriesKcal: cleanedActiveCal,
+      source: input.source || "samsung_health",
+      syncedAt: input.syncedAt || nowIso,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    const supabase = createClient();
+    if (supabase) {
+      const user = await getCachedUser(supabase);
+      if (user) {
+        activityRecord.userId = user.id;
+        const { data, error } = await supabase
+          .from("daily_activities")
+          .upsert(
+            {
+              user_id: user.id,
+              activity_date: input.activityDate,
+              timezone: activityRecord.timezone,
+              steps: activityRecord.steps,
+              active_calories_kcal: activityRecord.activeCaloriesKcal,
+              source: activityRecord.source,
+              synced_at: activityRecord.syncedAt,
+              updated_at: nowIso,
+            },
+            { onConflict: "user_id,activity_date" }
+          )
+          .select()
+          .single();
+
+        if (data && !error) {
+          activityRecord.id = data.id;
+          activityRecord.createdAt = data.created_at;
+          activityRecord.updatedAt = data.updated_at;
+        } else if (error) {
+          console.error("Save daily activity to Supabase error:", error);
+        }
+      }
+    }
+
+    const currentAll = getStorage<StoredDailyActivity[]>("daily_activities", []);
+    const existingIdx = currentAll.findIndex((a) => a.activityDate === input.activityDate);
+    if (existingIdx >= 0) {
+      currentAll[existingIdx] = { ...currentAll[existingIdx], ...activityRecord };
+      setStorage("daily_activities", currentAll);
+    } else {
+      setStorage("daily_activities", [...currentAll, activityRecord]);
+    }
+
+    setCachedData(`activity_date_${input.activityDate}`, activityRecord, CACHE_TTL.ACTIVITY);
+    return activityRecord;
+  },
+
+  async disconnectActivity(): Promise<void> {
+    clearActivityCache();
+    setStorage("daily_activities", []);
   },
 
   // 4. Metabolic Health Preferences

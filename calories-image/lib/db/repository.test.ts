@@ -353,6 +353,45 @@ describe("Database Repository & Calorie Tracking", () => {
     expect(updated?.items[0].protein).toBe(62);
   });
 
+  it("saves, retrieves, and updates daily physical activity from Health Connect", async () => {
+    // Save daily activity record for today
+    const activity = await repository.saveActivity({
+      activityDate: "2026-11-03",
+      steps: 8520,
+      activeCaloriesKcal: 320.5,
+      source: "samsung_health",
+      timezone: "Asia/Ho_Chi_Minh",
+    });
+
+    expect(activity).toBeDefined();
+    expect(activity.activityDate).toBe("2026-11-03");
+    expect(activity.steps).toBe(8520);
+    expect(activity.activeCaloriesKcal).toBe(320.5);
+    expect(activity.source).toBe("samsung_health");
+
+    // Fetch single date
+    const fetched = await repository.getActivityForDate("2026-11-03");
+    expect(fetched).toBeDefined();
+    expect(fetched?.steps).toBe(8520);
+    expect(fetched?.activeCaloriesKcal).toBe(320.5);
+
+    // Update with more steps later in the day
+    const updated = await repository.saveActivity({
+      activityDate: "2026-11-03",
+      steps: 10240,
+      activeCaloriesKcal: 410.2,
+      source: "samsung_health",
+    });
+    expect(updated.steps).toBe(10240);
+    expect(updated.activeCaloriesKcal).toBe(410.2);
+
+    // Check recent activities list
+    const recents = await repository.getRecentActivities(7);
+    expect(recents.length).toBeGreaterThan(0);
+    expect(recents[0].activityDate).toBe("2026-11-03");
+    expect(recents[0].steps).toBe(10240);
+  });
+
   it("exports all user data as valid JSON", async () => {
     const exportedJson = await repository.exportAllData();
     expect(typeof exportedJson).toBe("string");

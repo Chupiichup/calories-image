@@ -22,6 +22,7 @@ import {
   vietnamDateTimeLocalToIso,
 } from "@/lib/db/repository";
 import { round } from "@/lib/nutrition";
+import { DailyActivityCard } from "./DailyActivityCard";
 
 interface DiaryTabProps {
   meals: StoredMeal[];
@@ -196,6 +197,9 @@ export function DiaryTab({
           )}
         </div>
       </div>
+
+      {/* Daily Physical Activity Card */}
+      <DailyActivityCard selectedDate={selectedDate} />
 
       {/* Meal Group Cards */}
       <div className="space-y-4">

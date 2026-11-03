@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Calories Image Companion</string>
+    <string name="health_connect_rationale">Calories Image cần quyền đọc số bước chân và calo tiêu hao vận động từ Samsung Health thông qua Android Health Connect để đồng bộ với nhật ký dinh dưỡng của bạn.</string>
+</resources>
+
