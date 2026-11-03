@@ -259,13 +259,6 @@ export default function Home() {
     await loadData(targetDate, false);
   };
 
-  // Handler: Merge meals from one day to another
-  const handleMergeMeals = async (sourceDate: string, targetDate: string) => {
-    await repository.mergeMealsToDate(sourceDate, targetDate);
-    setSelectedDate(targetDate);
-    await loadData(targetDate, false);
-  };
-
   // Handler: Select Date from History to open Diary
   const handleSelectDateForDiary = (date: string) => {
     setSelectedDate(date);
@@ -463,7 +456,6 @@ export default function Home() {
           <HistoryTab
             meals={allMeals}
             goal={goal}
-            onMergeMeals={handleMergeMeals}
             onSelectDateForDiary={handleSelectDateForDiary}
           />
         )}

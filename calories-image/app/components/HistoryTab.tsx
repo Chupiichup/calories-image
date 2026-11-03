@@ -13,11 +13,10 @@ import { round } from "@/lib/nutrition";
 interface HistoryTabProps {
   meals: StoredMeal[];
   goal: StoredGoal;
-  onMergeMeals?: (sourceDate: string, targetDate: string) => Promise<void>;
   onSelectDateForDiary?: (date: string) => void;
 }
 
-export function HistoryTab({ meals, goal, onMergeMeals, onSelectDateForDiary }: HistoryTabProps) {
+export function HistoryTab({ meals, goal, onSelectDateForDiary }: HistoryTabProps) {
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
 
   // Deduplicate any repeated meals across history
