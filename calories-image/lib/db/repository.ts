@@ -222,6 +222,83 @@ function setStorage<T>(key: string, val: T): void {
   memoryStore.set(key, val);
 }
 
+// Helper to generate a compliant UUID v4 string
+export function generateUUID(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+// In-Memory cache with TTL
+interface CacheRecord<T> {
+  data: T;
+  cachedAt: number;
+  ttlMs: number;
+}
+
+const memoryCache = new Map<string, CacheRecord<any>>();
+
+export function getCachedData<T>(key: string): T | null {
+  const item = memoryCache.get(key);
+  if (!item) return null;
+  if (Date.now() - item.cachedAt > item.ttlMs) {
+    memoryCache.delete(key);
+    return null;
+  }
+  return item.data as T;
+}
+
+export function setCachedData<T>(key: string, data: T, ttlMs: number): void {
+  memoryCache.set(key, { data, cachedAt: Date.now(), ttlMs });
+}
+
+export function clearCachePrefix(prefix: string): void {
+  for (const key of memoryCache.keys()) {
+    if (key.startsWith(prefix)) {
+      memoryCache.delete(key);
+    }
+  }
+}
+
+export function clearMealCache(): void {
+  clearCachePrefix("meals_");
+  clearCachePrefix("all_meals");
+}
+
+export function clearAllMemoryCache(): void {
+  memoryCache.clear();
+  cachedAuthUser = null;
+}
+
+// Standard TTL durations
+export const CACHE_TTL = {
+  PROFILE: 15 * 60 * 1000,    // 15 minutes
+  METABOLIC: 15 * 60 * 1000,  // 15 minutes
+  WEIGHT: 5 * 60 * 1000,      // 5 minutes
+  MEALS: 60 * 1000,           // 1 minute (auto-revalidates or invalidates on mutate)
+};
+
+// Cached Supabase User to prevent duplicate /auth/v1/user network requests
+let cachedAuthUser: { user: any; cachedAt: number } | null = null;
+
+async function getCachedUser(supabase: any): Promise<any> {
+  if (cachedAuthUser && Date.now() - cachedAuthUser.cachedAt < 30000) {
+    return cachedAuthUser.user;
+  }
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    cachedAuthUser = { user, cachedAt: Date.now() };
+    return user;
+  } catch {
+    return null;
+  }
+}
+
 // Helper to deduplicate meals (e.g. from array merges or rapid double clicks)
 export function deduplicateMealList(meals: StoredMeal[]): { unique: StoredMeal[]; duplicateIds: string[] } {
   const unique: StoredMeal[] = [];
@@ -276,11 +353,15 @@ export function deduplicateMealList(meals: StoredMeal[]): { unique: StoredMeal[]
 export const repository = {
   // 1. Profile & Goals
   async getProfile(): Promise<{ profile: StoredProfile; goal: StoredGoal }> {
+    const cacheKey = "profile_and_goal";
+    const cached = getCachedData<{ profile: StoredProfile; goal: StoredGoal }>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const supabase = createClient();
     if (supabase) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getCachedUser(supabase);
 
       if (user) {
         const { data: profile } = await supabase
@@ -342,6 +423,7 @@ export const repository = {
 
           setStorage("profile", resolvedProfile);
           setStorage("goal", resolvedGoal);
+          setCachedData(cacheKey, { profile: resolvedProfile, goal: resolvedGoal }, CACHE_TTL.PROFILE);
 
           return { profile: resolvedProfile, goal: resolvedGoal };
         }
@@ -351,18 +433,19 @@ export const repository = {
     // Demo/LocalStorage fallback
     const profile = getStorage<StoredProfile>("profile", DEFAULT_PROFILE);
     const goal = getStorage<StoredGoal>("goal", DEFAULT_GOAL);
-    return { profile, goal };
+    const result = { profile, goal };
+    setCachedData(cacheKey, result, CACHE_TTL.PROFILE);
+    return result;
   },
 
   async saveProfileAndGoal(
     profileInput: Omit<StoredProfile, "id" | "updatedAt">,
     goalInput: Omit<StoredGoal, "id" | "userId" | "updatedAt">,
   ): Promise<{ profile: StoredProfile; goal: StoredGoal }> {
+    clearCachePrefix("profile_and_goal");
     const supabase = createClient();
     if (supabase) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getCachedUser(supabase);
 
       if (user) {
         // Calculate date_of_birth from ageYears
@@ -426,11 +509,15 @@ export const repository = {
 
   // 2. Meals
   async getMealsForDate(dateString: string): Promise<StoredMeal[]> {
+    const cacheKey = `meals_date_${dateString}`;
+    const cached = getCachedData<StoredMeal[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const supabase = createClient();
     if (supabase) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getCachedUser(supabase);
 
       if (user) {
         // Calculate timezone-aware local start and end of day strictly in Vietnam timezone (UTC+7)
@@ -505,6 +592,7 @@ export const repository = {
           // Merge this day's deduped meals with existing meals from other days so we don't wipe history!
           const otherDays = currentLocalMeals.filter((m) => getLocalDateString(m.eatenAt) !== dateString);
           setStorage("meals", [...deduped, ...otherDays]);
+          setCachedData(cacheKey, deduped, CACHE_TTL.MEALS);
           return deduped;
         }
       }
@@ -516,15 +604,20 @@ export const repository = {
     const otherDays = cleaned.filter((m) => getLocalDateString(m.eatenAt) !== dateString);
     const dayMeals = deduped.filter((m) => getLocalDateString(m.eatenAt) === dateString);
     setStorage("meals", [...dayMeals, ...otherDays]);
+    setCachedData(cacheKey, dayMeals, CACHE_TTL.MEALS);
     return dayMeals;
   },
 
   async getAllMeals(): Promise<StoredMeal[]> {
+    const cacheKey = "all_meals";
+    const cached = getCachedData<StoredMeal[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const supabase = createClient();
     if (supabase) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getCachedUser(supabase);
 
       if (user) {
         const { data: meals, error: mealsErr } = await supabase
@@ -590,6 +683,7 @@ export const repository = {
           // Deduplicate duplicate meals by ID or rapid double-submit
           const { unique: deduped } = deduplicateMealList(rawMapped);
           setStorage("meals", deduped);
+          setCachedData(cacheKey, deduped, CACHE_TTL.MEALS);
           return deduped;
         }
       }
@@ -599,6 +693,7 @@ export const repository = {
     const cleaned = allMeals.filter((m) => m.id !== "meal-1" && m.id !== "meal-2");
     const { unique: deduped } = deduplicateMealList(cleaned);
     setStorage("meals", deduped);
+    setCachedData(cacheKey, deduped, CACHE_TTL.MEALS);
     return deduped;
   },
 
@@ -625,10 +720,9 @@ export const repository = {
       metabolicNotes?: string;
     }>;
   }): Promise<StoredMeal> {
-    const randSuffix = Math.random().toString(36).substring(2, 7);
-    const mealId = `meal-${Date.now()}-${randSuffix}`;
-    const newItems: StoredMealItem[] = input.items.map((it, idx) => ({
-      id: `mi-${Date.now()}-${idx}-${randSuffix}`,
+    const mealId = generateUUID();
+    const newItems: StoredMealItem[] = input.items.map((it) => ({
+      id: generateUUID(),
       mealId,
       foodId: it.foodId,
       foodNameSnapshot: it.foodName,
@@ -665,15 +759,14 @@ export const repository = {
     const supabase = createClient();
     if (supabase) {
       try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+        const user = await getCachedUser(supabase);
 
         if (user) {
           newMeal.userId = user.id;
           const { data: dbMeal, error: mealErr } = await supabase
             .from("meals")
             .insert({
+              id: mealId,
               user_id: user.id,
               eaten_at: input.eatenAt,
               meal_type: input.mealType,
@@ -688,11 +781,10 @@ export const repository = {
           }
 
           if (dbMeal) {
-            newMeal.id = dbMeal.id;
-
             // Important: validate food_id is UUID before DB insert, otherwise Postgres throws error 22P02
             const itemsToInsert = newItems.map((it) => ({
-              meal_id: dbMeal.id,
+              id: it.id,
+              meal_id: mealId,
               food_id: isValidUUID(it.foodId) ? it.foodId : null,
               food_name_snapshot: it.foodNameSnapshot,
               portion_g: it.portionG,
@@ -717,9 +809,9 @@ export const repository = {
             const { error: itemsErr } = await supabase.from("meal_items").insert(itemsToInsert);
             if (itemsErr) {
               console.warn("Supabase insert meal_items with metabolic fields failed, falling back to base columns:", itemsErr);
-              // Fallback to base columns in case 003_metabolic_guardrails.sql hasn't been run on remote DB
               const baseItems = itemsToInsert.map((it) => ({
-                meal_id: it.meal_id,
+                id: it.id,
+                meal_id: mealId,
                 food_id: it.food_id,
                 food_name_snapshot: it.food_name_snapshot,
                 portion_g: it.portion_g,
@@ -747,6 +839,7 @@ export const repository = {
     // Always update local storage for instant sync & demo
     const currentMeals = getStorage<StoredMeal[]>("meals", DEFAULT_MEALS);
     setStorage("meals", [newMeal, ...currentMeals]);
+    clearMealCache();
 
     return newMeal;
   },
@@ -761,6 +854,7 @@ export const repository = {
       "meals",
       currentMeals.filter((m) => m.id !== mealId),
     );
+    clearMealCache();
   },
 
   async updateMeal(
@@ -769,6 +863,7 @@ export const repository = {
       eatenAt?: string;
       mealType?: "breakfast" | "lunch" | "dinner" | "snack";
       notes?: string;
+      items?: StoredMealItem[];
     },
   ): Promise<StoredMeal | null> {
     const supabase = createClient();
@@ -778,7 +873,71 @@ export const repository = {
         if (updates.eatenAt) dbPayload.eaten_at = updates.eatenAt;
         if (updates.mealType) dbPayload.meal_type = updates.mealType;
         if (updates.notes !== undefined) dbPayload.notes = updates.notes;
+        dbPayload.updated_at = new Date().toISOString();
         await supabase.from("meals").update(dbPayload).eq("id", mealId);
+
+        if (updates.items && updates.items.length > 0) {
+          const itemsToUpsert = updates.items.map((it) => ({
+            id: isValidUUID(it.id) ? it.id : generateUUID(),
+            meal_id: mealId,
+            food_id: isValidUUID(it.foodId) ? it.foodId : null,
+            food_name_snapshot: it.foodNameSnapshot,
+            portion_g: it.portionG,
+            calories: it.calories,
+            protein: it.protein,
+            carbs: it.carbs,
+            fat: it.fat,
+            fiber: it.fiber,
+            nutrition_source: it.nutritionSource || "manual",
+            is_ai_estimated: Boolean(it.isAiEstimated),
+            confidence: it.confidence || null,
+            sugar_classification: it.sugarClassification || "UNKNOWN",
+            added_sugar_g: typeof it.addedSugarG === "number" ? it.addedSugarG : 0,
+            total_sugar_g: typeof it.totalSugarG === "number" ? it.totalSugarG : 0,
+            gi_value: it.giValue ?? null,
+            gi_category: it.giCategory || "unknown",
+            gl_value: it.glValue ?? null,
+            gl_category: it.glCategory || "unknown",
+            metabolic_notes: it.metabolicNotes ?? null,
+            updated_at: new Date().toISOString(),
+          }));
+
+          const { error: itemsErr } = await supabase.from("meal_items").upsert(itemsToUpsert);
+          if (itemsErr) {
+            console.warn("Supabase upsert meal_items failed, attempting base fields:", itemsErr);
+            const baseUpsert = itemsToUpsert.map((it) => ({
+              id: it.id,
+              meal_id: it.meal_id,
+              food_id: it.food_id,
+              food_name_snapshot: it.food_name_snapshot,
+              portion_g: it.portion_g,
+              calories: it.calories,
+              protein: it.protein,
+              carbs: it.carbs,
+              fat: it.fat,
+              fiber: it.fiber,
+              nutrition_source: it.nutrition_source,
+              is_ai_estimated: it.is_ai_estimated,
+              confidence: it.confidence,
+            }));
+            await supabase.from("meal_items").upsert(baseUpsert);
+          }
+
+          // Delete removed items
+          const keepIds = itemsToUpsert.map((it) => it.id).filter(isValidUUID);
+          if (keepIds.length > 0) {
+            const { data: existingDbItems } = await supabase
+              .from("meal_items")
+              .select("id")
+              .eq("meal_id", mealId);
+            if (existingDbItems) {
+              const toDelete = existingDbItems.filter((di: any) => !keepIds.includes(di.id)).map((di: any) => di.id);
+              if (toDelete.length > 0) {
+                await supabase.from("meal_items").delete().in("id", toDelete);
+              }
+            }
+          }
+        }
       } catch (err) {
         console.warn("Could not update meal in Supabase:", err);
       }
@@ -793,6 +952,7 @@ export const repository = {
           eatenAt: updates.eatenAt ?? m.eatenAt,
           mealType: updates.mealType ?? m.mealType,
           notes: updates.notes !== undefined ? updates.notes : m.notes,
+          items: updates.items ? updates.items : m.items,
         };
         return updated;
       }
@@ -800,6 +960,7 @@ export const repository = {
     });
 
     setStorage("meals", nextList);
+    clearMealCache();
     return updated;
   },
 
@@ -835,6 +996,7 @@ export const repository = {
     }
 
     setStorage("meals", updatedMeals);
+    clearMealCache();
     return movedCount;
   },
 
@@ -925,11 +1087,13 @@ export const repository = {
 
   // 3. Weight Tracking
   async getWeightEntries(): Promise<StoredWeightEntry[]> {
+    const cacheKey = "weight_entries";
+    const cached = getCachedData<StoredWeightEntry[]>(cacheKey);
+    if (cached) return cached;
+
     const supabase = createClient();
     if (supabase) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getCachedUser(supabase);
 
       if (user) {
         const { data } = await supabase
@@ -939,13 +1103,15 @@ export const repository = {
           .order("recorded_at", { ascending: true });
 
         if (data && data.length > 0) {
-          return data.map((d) => ({
+          const res = data.map((d) => ({
             id: d.id,
             userId: d.user_id,
             recordedAt: d.recorded_at,
             weightKg: Number(d.weight_kg),
             notes: d.notes,
           }));
+          setCachedData(cacheKey, res, CACHE_TTL.WEIGHT);
+          return res;
         }
       }
     }
@@ -955,6 +1121,7 @@ export const repository = {
     if (cleaned.length !== allWeights.length) {
       setStorage("weight_entries", cleaned);
     }
+    setCachedData(cacheKey, cleaned, CACHE_TTL.WEIGHT);
     return cleaned;
   },
 
@@ -963,7 +1130,8 @@ export const repository = {
     recordedAt: string;
     notes?: string;
   }): Promise<StoredWeightEntry> {
-    const id = `w-${Date.now()}`;
+    clearCachePrefix("weight_entries");
+    const id = generateUUID();
     const newEntry: StoredWeightEntry = {
       id,
       userId: "demo-user-1",
@@ -974,18 +1142,17 @@ export const repository = {
 
     const supabase = createClient();
     if (supabase) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getCachedUser(supabase);
 
       if (user) {
         newEntry.userId = user.id;
         const { data } = await supabase
           .from("weight_entries")
           .insert({
+            id,
             user_id: user.id,
             weight_kg: entry.weightKg,
-            recordedAt: entry.recordedAt,
+            recorded_at: entry.recordedAt,
             notes: entry.notes,
           })
           .select()
@@ -1003,6 +1170,7 @@ export const repository = {
   },
 
   async deleteWeightEntry(id: string): Promise<void> {
+    clearCachePrefix("weight_entries");
     const supabase = createClient();
     if (supabase) {
       await supabase.from("weight_entries").delete().eq("id", id);
@@ -1016,11 +1184,13 @@ export const repository = {
 
   // 4. Metabolic Health Preferences
   async getMetabolicPreferences(): Promise<MetabolicPreferences> {
+    const cacheKey = "metabolic_preferences";
+    const cached = getCachedData<MetabolicPreferences>(cacheKey);
+    if (cached) return cached;
+
     const supabase = createClient();
     if (supabase) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getCachedUser(supabase);
 
       if (user) {
         const { data: dbPrefs, error } = await supabase
@@ -1061,13 +1231,14 @@ export const repository = {
             customDietaryNotes: dbPrefs.custom_dietary_notes || "",
           };
           setStorage("metabolic_preferences", resolved);
+          setCachedData(cacheKey, resolved, CACHE_TTL.METABOLIC);
           return resolved;
         }
       }
     }
 
     const local = getStorage<MetabolicPreferences>("metabolic_preferences", DEFAULT_METABOLIC_PREFERENCES);
-    return {
+    const fallbackResult: MetabolicPreferences = {
       ...DEFAULT_METABOLIC_PREFERENCES,
       ...local,
       enabled: local.enabled ?? local.metabolicMonitoringEnabled ?? DEFAULT_METABOLIC_PREFERENCES.enabled,
@@ -1083,9 +1254,12 @@ export const repository = {
       warnMorningHighGi: local.warnMorningHighGi ?? local.morningHighGiWarningEnabled ?? DEFAULT_METABOLIC_PREFERENCES.warnMorningHighGi,
       morningHighGiWarningEnabled: local.morningHighGiWarningEnabled ?? local.warnMorningHighGi ?? DEFAULT_METABOLIC_PREFERENCES.morningHighGiWarningEnabled,
     };
+    setCachedData(cacheKey, fallbackResult, CACHE_TTL.METABOLIC);
+    return fallbackResult;
   },
 
   async saveMetabolicPreferences(prefs: MetabolicPreferences): Promise<MetabolicPreferences> {
+    clearCachePrefix("metabolic_preferences");
     const normalized: MetabolicPreferences = {
       ...prefs,
       enabled: prefs.enabled ?? prefs.metabolicMonitoringEnabled ?? true,

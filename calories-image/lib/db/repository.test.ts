@@ -293,6 +293,66 @@ describe("Database Repository & Calorie Tracking", () => {
     expect(oct30After.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("generates valid standard UUIDs for meals and meal items", async () => {
+    const saved = await repository.saveMeal({
+      mealType: "breakfast",
+      eatenAt: new Date().toISOString(),
+      analysisStatus: "manual",
+      items: [
+        {
+          foodName: "Trứng gà luộc",
+          portionG: 60,
+          nutrition: { calories: 85, protein: 7, carbs: 0.5, fat: 5.5, fiber: 0 },
+        },
+      ],
+    });
+
+    expect(isValidUUID(saved.id)).toBe(true);
+    expect(saved.items).toHaveLength(1);
+    expect(isValidUUID(saved.items[0].id)).toBe(true);
+    expect(saved.items[0].mealId).toBe(saved.id);
+  });
+
+  it("updates meal items portion and recalculates macros and calories", async () => {
+    const saved = await repository.saveMeal({
+      mealType: "lunch",
+      eatenAt: new Date().toISOString(),
+      analysisStatus: "manual",
+      items: [
+        {
+          foodName: "Ức gà hấp",
+          portionG: 100,
+          nutrition: { calories: 165, protein: 31, carbs: 0, fat: 3.6, fiber: 0 },
+        },
+      ],
+    });
+
+    expect(saved.items[0].portionG).toBe(100);
+    expect(saved.items[0].calories).toBe(165);
+
+    // Update portion from 100g to 200g (double the calories & protein)
+    const updatedItems = [
+      {
+        ...saved.items[0],
+        portionG: 200,
+        calories: 330,
+        protein: 62,
+        carbs: 0,
+        fat: 7.2,
+        fiber: 0,
+      },
+    ];
+
+    const updated = await repository.updateMeal(saved.id, {
+      items: updatedItems,
+    });
+
+    expect(updated).toBeDefined();
+    expect(updated?.items[0].portionG).toBe(200);
+    expect(updated?.items[0].calories).toBe(330);
+    expect(updated?.items[0].protein).toBe(62);
+  });
+
   it("exports all user data as valid JSON", async () => {
     const exportedJson = await repository.exportAllData();
     expect(typeof exportedJson).toBe("string");

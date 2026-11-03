@@ -42,13 +42,33 @@ export default function Home() {
   const [isSyncing, setIsSyncing] = useState(false);
 
   // Core reactive data states
-  const [profile, setProfile] = useState<StoredProfile | null>(null);
-  const [goal, setGoal] = useState<StoredGoal | null>(null);
+  const [profile, setProfile] = useState<StoredProfile | null>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const v = window.localStorage.getItem("calories_image_profile");
+        return v ? JSON.parse(v) : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
+  const [goal, setGoal] = useState<StoredGoal | null>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const v = window.localStorage.getItem("calories_image_goal");
+        return v ? JSON.parse(v) : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
   const [todayMeals, setTodayMeals] = useState<StoredMeal[]>([]);
   const [diaryMeals, setDiaryMeals] = useState<StoredMeal[]>([]);
   const [allMeals, setAllMeals] = useState<StoredMeal[]>([]);
   const [weightEntries, setWeightEntries] = useState<StoredWeightEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Modals state
   const [isMealLoggerOpen, setIsMealLoggerOpen] = useState(false);
@@ -58,11 +78,12 @@ export default function Home() {
 
   // Initialize selected date on client mount
   useEffect(() => {
-    setSelectedDate(getLocalDateString());
+    const today = getLocalDateString();
+    setSelectedDate(today);
   }, []);
 
   // Load data whenever selectedDate changes
-  const loadData = useCallback(async (dateForDiary?: string, showLoading = true) => {
+  const loadData = useCallback(async (dateForDiary?: string, showLoading = false) => {
     try {
       if (showLoading) {
         setIsLoading(true);
@@ -73,30 +94,23 @@ export default function Home() {
       const todayStr = getLocalDateString();
       const targetDiaryDate = dateForDiary || selectedDate || todayStr;
 
-      const { profile: p, goal: g } = await repository.getProfile();
-      setProfile(p);
-      setGoal(g);
+      // Parallelize queries with Promise.all for fast non-blocking load
+      const [profileGoalRes, mealsTodayRes, mealsDiaryRes, allRes, weightsRes, mPrefsRes] = await Promise.all([
+        repository.getProfile(),
+        repository.getMealsForDate(todayStr),
+        targetDiaryDate === todayStr ? Promise.resolve(null) : repository.getMealsForDate(targetDiaryDate),
+        repository.getAllMeals(),
+        repository.getWeightEntries(),
+        repository.getMetabolicPreferences(),
+      ]);
 
-      // ALWAYS load today's meals for Dashboard metrics & remaining calories
-      const mealsToday = await repository.getMealsForDate(todayStr);
-      setTodayMeals(mealsToday);
-
-      // Load diary meals for the selected date
-      if (targetDiaryDate === todayStr) {
-        setDiaryMeals(mealsToday);
-      } else {
-        const mealsSelected = await repository.getMealsForDate(targetDiaryDate);
-        setDiaryMeals(mealsSelected);
-      }
-
-      const all = await repository.getAllMeals();
-      setAllMeals(all);
-
-      const weights = await repository.getWeightEntries();
-      setWeightEntries(weights);
-
-      const mPrefs = await repository.getMetabolicPreferences();
-      if (mPrefs) setMetabolicPrefs(mPrefs);
+      setProfile(profileGoalRes.profile);
+      setGoal(profileGoalRes.goal);
+      setTodayMeals(mealsTodayRes);
+      setDiaryMeals(targetDiaryDate === todayStr ? mealsTodayRes : (mealsDiaryRes || []));
+      setAllMeals(allRes);
+      setWeightEntries(weightsRes);
+      if (mPrefsRes) setMetabolicPrefs(mPrefsRes);
     } catch (err) {
       console.error("Error loading nutrition coach data:", err);
     } finally {
@@ -229,24 +243,27 @@ export default function Home() {
     }
   };
 
-  // Handler: Update Meal Time / Type
+  // Handler: Update Meal Time / Type / Items
   const handleUpdateMeal = async (
     mealId: string,
     updates: {
       eatenAt?: string;
       mealType?: "breakfast" | "lunch" | "dinner" | "snack";
       notes?: string;
+      items?: any[];
     },
   ) => {
     await repository.updateMeal(mealId, updates);
-    await loadData(selectedDate);
+    const targetDate = updates.eatenAt ? getLocalDateString(updates.eatenAt) : selectedDate;
+    setSelectedDate(targetDate);
+    await loadData(targetDate, false);
   };
 
   // Handler: Merge meals from one day to another
   const handleMergeMeals = async (sourceDate: string, targetDate: string) => {
     await repository.mergeMealsToDate(sourceDate, targetDate);
     setSelectedDate(targetDate);
-    await loadData(targetDate);
+    await loadData(targetDate, false);
   };
 
   // Handler: Select Date from History to open Diary
@@ -258,7 +275,7 @@ export default function Home() {
   // Handler: Delete Meal
   const handleDeleteMeal = async (mealId: string) => {
     await repository.deleteMeal(mealId);
-    await loadData(selectedDate);
+    await loadData(selectedDate, false);
   };
 
   // Handler: Add Weight Entry

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { History, Calendar, Flame, Dumbbell, Wheat, Droplet, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
+import { History, Calendar, Flame, Dumbbell, Wheat, Droplet, ChevronDown, ChevronUp } from "lucide-react";
 import {
   getLocalDateString,
   deduplicateMealList,
@@ -19,7 +19,6 @@ interface HistoryTabProps {
 
 export function HistoryTab({ meals, goal, onMergeMeals, onSelectDateForDiary }: HistoryTabProps) {
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
-  const [isMerging, setIsMerging] = useState(false);
 
   // Deduplicate any repeated meals across history
   const { unique: dedupedMeals } = deduplicateMealList(meals);
@@ -119,55 +118,6 @@ export function HistoryTab({ meals, goal, onMergeMeals, onSelectDateForDiary }: 
           <h3 className="text-base font-bold text-stone-900">Chi tiết từng ngày</h3>
           <span className="text-xs text-stone-500">Bấm vào từng ngày để xem chi tiết các món ăn</span>
         </div>
-
-        {/* 1-Click Tool to merge / consolidate days */}
-        {historyDays.length > 1 && (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 space-y-2.5">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-emerald-600 shrink-0" />
-              <h4 className="text-xs font-bold text-emerald-950">
-                Gom toàn bộ bữa ăn về một ngày (Giờ Việt Nam)
-              </h4>
-            </div>
-            <p className="text-[11px] text-emerald-800 leading-relaxed">
-              Bạn đang có {historyDays.length} ngày ghi nhận do các bữa ăn được chụp hoặc lưu qua mốc nửa đêm (sau 00:00).
-              Bạn có thể gom toàn bộ các bữa ăn về cùng một ngày:
-            </p>
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              {historyDays.map((d) => {
-                const [y, m, day] = d.date.split("-").map(Number);
-                const dateObj = new Date(y, m - 1, day, 12, 0, 0);
-                const dayLabel = dateObj.toLocaleDateString("vi-VN", {
-                  weekday: "short",
-                  day: "2-digit",
-                  month: "2-digit",
-                });
-                return (
-                  <button
-                    key={d.date}
-                    type="button"
-                    disabled={isMerging}
-                    onClick={async () => {
-                      if (!onMergeMeals) return;
-                      setIsMerging(true);
-                      try {
-                        const otherDays = historyDays.filter((x) => x.date !== d.date);
-                        for (const o of otherDays) {
-                          await onMergeMeals(o.date, d.date);
-                        }
-                      } finally {
-                        setIsMerging(false);
-                      }
-                    }}
-                    className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3 py-1.5 text-xs font-bold text-emerald-800 shadow-sm hover:bg-emerald-600 hover:text-white transition active:scale-95 disabled:opacity-50"
-                  >
-                    <span>👉 Gom tất cả về {dayLabel} ({round(d.calories, 0)} kcal)</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
         {historyDays.length === 0 ? (
           <p className="text-xs text-stone-400 italic text-center py-8">Chưa có lịch sử bữa ăn nào.</p>
