@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Calendar,
   X,
+  Download,
 } from "lucide-react";
 import {
   repository,
@@ -345,6 +346,21 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
                     <span>Dữ liệu sẽ được gửi thẳng lên hệ thống máy chủ và hiển thị ngay lập tức trên dashboard web của bạn.</span>
                   </div>
                 </div>
+              </div>
+
+              <div className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 p-4 text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-bold text-sm">Tải file cài đặt APK cho điện thoại</h4>
+                  <p className="text-[11px] text-emerald-100">Bản cài đặt trực tiếp CaloriesImageCompanion.apk (17.2 MB)</p>
+                </div>
+                <a
+                  href="/CaloriesImageCompanion.apk"
+                  download="CaloriesImageCompanion.apk"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-xs font-bold text-emerald-950 shadow-sm hover:bg-emerald-50 transition active:scale-95 shrink-0"
+                >
+                  <Download className="h-4 w-4 text-emerald-700" />
+                  <span>Tải file APK (.apk)</span>
+                </a>
               </div>
 
               <div className="rounded-xl bg-emerald-50/70 p-3 border border-emerald-200 text-emerald-900">
