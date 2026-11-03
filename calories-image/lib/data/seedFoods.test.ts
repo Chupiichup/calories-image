@@ -42,6 +42,43 @@ describe("seedFoods and searchFoods", () => {
     expect(searchFoods("sua chua").length).toBeGreaterThan(0);
   });
 
+  it("finds everyday raw cooking ingredients (mướp, lạc sống, sườn, rau củ quả, gia vị)", () => {
+    // Mướp
+    const muopRes = searchFoods("mướp");
+    expect(muopRes.length).toBeGreaterThan(0);
+    expect(muopRes.some((f) => f.id === "food-muop-huong")).toBe(true);
+
+    const muopResUnaccented = searchFoods("muop");
+    expect(muopResUnaccented.length).toBeGreaterThan(0);
+    expect(muopResUnaccented.some((f) => f.id === "food-muop-huong")).toBe(true);
+
+    // Lạc sống
+    const lacRes = searchFoods("lạc sống");
+    expect(lacRes.length).toBeGreaterThan(0);
+    expect(lacRes.some((f) => f.id === "food-lac-song")).toBe(true);
+
+    const lacResUnaccented = searchFoods("lac song");
+    expect(lacResUnaccented.length).toBeGreaterThan(0);
+    expect(lacResUnaccented.some((f) => f.id === "food-lac-song")).toBe(true);
+
+    // Sườn
+    const suonRes = searchFoods("sườn");
+    expect(suonRes.length).toBeGreaterThan(0);
+    expect(suonRes.some((f) => f.id === "food-suon-non-heo")).toBe(true);
+
+    const suonResUnaccented = searchFoods("suon");
+    expect(suonResUnaccented.length).toBeGreaterThan(0);
+    expect(suonResUnaccented.some((f) => f.id === "food-suon-non-heo")).toBe(true);
+
+    // Other staple raw ingredients
+    expect(searchFoods("rau ngot").some((f) => f.id === "food-rau-ngot-tuoi")).toBe(true);
+    expect(searchFoods("mong toi").some((f) => f.id === "food-rau-mong-toi")).toBe(true);
+    expect(searchFoods("su su").some((f) => f.id === "food-su-su-tuoi")).toBe(true);
+    expect(searchFoods("su hao").some((f) => f.id === "food-su-hao-tuoi")).toBe(true);
+    expect(searchFoods("dau an").some((f) => f.id === "food-dau-an-thuc-vat")).toBe(true);
+    expect(searchFoods("mo heo").some((f) => f.id === "food-mo-heo")).toBe(true);
+  });
+
   it("has valid non-zero portions and verified nutrition for all items", () => {
     expect(SEED_FOODS.length).toBeGreaterThan(50);
     for (const item of SEED_FOODS) {

@@ -85,4 +85,22 @@ describe("portionUnits helper", () => {
     expect(state.unitQuantity).toBe(150);
     expect(state.portionG).toBe(150);
   });
+
+  it("resolves raw ingredients: mướp to 'quả', lạc sống to 'nắm', sườn to 'dẻ'", () => {
+    const muopUnits = resolveFoodPortionUnits("Mướp hương tươi");
+    const muopDef = getDefaultUnitOption(muopUnits);
+    expect(muopDef.unitName).toBe("quả");
+    expect(muopDef.gramsPerUnit).toBe(200);
+
+    const lacUnits = resolveFoodPortionUnits("Lạc sống (Hạt đậu phộng sống)");
+    const lacDef = getDefaultUnitOption(lacUnits);
+    expect(lacDef.unitName).toBe("nắm");
+    expect(lacDef.gramsPerUnit).toBe(30);
+
+    const suonUnits = resolveFoodPortionUnits("Sườn non heo (Sườn lợn sống)");
+    const suonDef = getDefaultUnitOption(suonUnits);
+    expect(suonDef.unitName).toBe("dẻ");
+    expect(suonDef.gramsPerUnit).toBe(150);
+  });
 });
+

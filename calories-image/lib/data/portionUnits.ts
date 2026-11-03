@@ -68,7 +68,7 @@ const NATURAL_FOOD_UNIT_PATTERNS: Array<{
     ],
   },
   {
-    pattern: /tao(?!\s*bon)/i,
+    pattern: /\b(qua\s*tao|trai\s*tao|tao)\b(?!\s*bon)/i,
     unitName: "quả",
     defaultGrams: 150,
     unitVariants: [
@@ -77,7 +77,7 @@ const NATURAL_FOOD_UNIT_PATTERNS: Array<{
     ],
   },
   {
-    pattern: /cam(?!\s*sanh\s*kg)/i,
+    pattern: /\b(qua\s*cam|trai\s*cam|cam)\b(?!\s*sanh\s*kg)/i,
     unitName: "quả",
     defaultGrams: 200,
     unitVariants: [
@@ -85,7 +85,7 @@ const NATURAL_FOOD_UNIT_PATTERNS: Array<{
     ],
   },
   {
-    pattern: /oi/i,
+    pattern: /\b(qua\s*oi|trai\s*oi|oi)\b/i,
     unitName: "quả",
     defaultGrams: 180,
     unitVariants: [
@@ -93,7 +93,7 @@ const NATURAL_FOOD_UNIT_PATTERNS: Array<{
     ],
   },
   {
-    pattern: /chanh/i,
+    pattern: /\b(chanh)\b/i,
     unitName: "quả",
     defaultGrams: 50,
     unitVariants: [
@@ -146,7 +146,7 @@ const NATURAL_FOOD_UNIT_PATTERNS: Array<{
     ],
   },
   {
-    pattern: /chao|sup|canh/i,
+    pattern: /\b(chao|sup|canh)\b/i,
     unitName: "bát",
     defaultGrams: 250,
     unitVariants: [
@@ -155,7 +155,7 @@ const NATURAL_FOOD_UNIT_PATTERNS: Array<{
     ],
   },
   {
-    pattern: /pho|bun\s*(bo|cha|rieu|thit)|hu\s*tiu|banh\s*canh|mien/i,
+    pattern: /\b(pho|bun\s*(bo|cha|rieu|thit)|hu\s*tiu|banh\s*canh|mien)\b/i,
     unitName: "tô",
     defaultGrams: 500,
     unitVariants: [
@@ -238,6 +238,114 @@ const NATURAL_FOOD_UNIT_PATTERNS: Array<{
       { label: "1 viên tam giác (~15g)", shortLabel: "viên (~15g)", grams: 15 },
     ],
   },
+  {
+    pattern: /muop\s*(dang|kho\s*qua)/i,
+    unitName: "quả",
+    defaultGrams: 180,
+    unitVariants: [
+      { label: "1 quả vừa (~180g)", shortLabel: "quả vừa (~180g)", grams: 180 },
+      { label: "1 quả nhỏ (~120g)", shortLabel: "quả nhỏ (~120g)", grams: 120 },
+    ],
+  },
+  {
+    pattern: /muop/i,
+    unitName: "quả",
+    defaultGrams: 200,
+    unitVariants: [
+      { label: "1 quả vừa (~200g)", shortLabel: "quả vừa (~200g)", grams: 200 },
+      { label: "1 quả to (~300g)", shortLabel: "quả to (~300g)", grams: 300 },
+      { label: "1 quả nhỏ (~150g)", shortLabel: "quả nhỏ (~150g)", grams: 150 },
+    ],
+  },
+  {
+    pattern: /suon/i,
+    unitName: "dẻ",
+    defaultGrams: 150,
+    unitVariants: [
+      { label: "1 dẻ sườn (~150g)", shortLabel: "dẻ (~150g)", grams: 150 },
+      { label: "1 lạng sườn (~100g)", shortLabel: "lạng (~100g)", grams: 100 },
+      { label: "1 bát canh sườn (~200g)", shortLabel: "bát (~200g)", grams: 200 },
+    ],
+  },
+  {
+    pattern: /\b(lac\s*(song|nhan)?|dau\s*phong\s*(song)?|lac)\b/i,
+    unitName: "nắm",
+    defaultGrams: 30,
+    unitVariants: [
+      { label: "1 nắm nhỏ (~30g)", shortLabel: "nắm (~30g)", grams: 30 },
+      { label: "1 thìa canh (~15g)", shortLabel: "thìa (~15g)", grams: 15 },
+      { label: "1 lạng (~100g)", shortLabel: "lạng (~100g)", grams: 100 },
+    ],
+  },
+  {
+    pattern: /trai\s*bau|qua\s*bau|bau\s*tuoi/i,
+    unitName: "khúc",
+    defaultGrams: 200,
+    unitVariants: [
+      { label: "1 khúc bầu (~200g)", shortLabel: "khúc (~200g)", grams: 200 },
+      { label: "1 quả nhỏ (~300g)", shortLabel: "quả nhỏ (~300g)", grams: 300 },
+    ],
+  },
+  {
+    pattern: /su\s*su/i,
+    unitName: "quả",
+    defaultGrams: 200,
+    unitVariants: [
+      { label: "1 quả vừa (~200g)", shortLabel: "quả vừa (~200g)", grams: 200 },
+    ],
+  },
+  {
+    pattern: /su\s*hao/i,
+    unitName: "củ",
+    defaultGrams: 250,
+    unitVariants: [
+      { label: "1 củ vừa (~250g)", shortLabel: "củ vừa (~250g)", grams: 250 },
+    ],
+  },
+  {
+    pattern: /ngo|bap\s*(ngot|my|nep)/i,
+    unitName: "bắp",
+    defaultGrams: 150,
+    unitVariants: [
+      { label: "1 bắp ngô (~150g)", shortLabel: "bắp (~150g)", grams: 150 },
+    ],
+  },
+  {
+    pattern: /dau\s*bap/i,
+    unitName: "quả",
+    defaultGrams: 15,
+    unitVariants: [
+      { label: "1 đĩa luộc (~120g)", shortLabel: "đĩa (~120g)", grams: 120 },
+      { label: "1 quả (~15g)", shortLabel: "quả (~15g)", grams: 15 },
+    ],
+  },
+  {
+    pattern: /dau\s*an|mo\s*(heo|lon)|dau\s*oliu/i,
+    unitName: "thìa canh",
+    defaultGrams: 14,
+    unitVariants: [
+      { label: "1 thìa canh (~14g - 15ml)", shortLabel: "thìa canh (~14g)", grams: 14 },
+      { label: "1 thìa cà phê (~5g - 5ml)", shortLabel: "thìa cà phê (~5g)", grams: 5 },
+    ],
+  },
+  {
+    pattern: /nuoc\s*mam|nuoc\s*tuong|xi\s*dau|dau\s*hao/i,
+    unitName: "thìa canh",
+    defaultGrams: 15,
+    unitVariants: [
+      { label: "1 thìa canh (~15g)", shortLabel: "thìa canh (~15g)", grams: 15 },
+      { label: "1 thìa cà phê (~5g)", shortLabel: "thìa cà phê (~5g)", grams: 5 },
+    ],
+  },
+  {
+    pattern: /thit.*song|bap\s*bo|nac\s*(than|vai)|ba\s*chi.*song|uc\s*ga|dui\s*ga|canh\s*ga|tom.*song|muc.*song|ca.*song/i,
+    unitName: "lạng",
+    defaultGrams: 100,
+    unitVariants: [
+      { label: "1 lạng (~100g)", shortLabel: "lạng (~100g)", grams: 100 },
+      { label: "1 miếng / phần (~150g)", shortLabel: "phần (~150g)", grams: 150 },
+    ],
+  },
 ];
 
 /**
@@ -248,6 +356,10 @@ function extractUnitNoun(label: string): string {
   if (/bat\s*an\s*com|chen\s*\(bat|chen\s*com|bat\s*con/i.test(norm)) return "bát ăn cơm";
   if (/qua|trai/i.test(norm)) return "quả";
   if (/cu/i.test(norm)) return "củ";
+  if (/de\s*suon|de/i.test(norm)) return "dẻ";
+  if (/lang/i.test(norm)) return "lạng";
+  if (/khuc/i.test(norm)) return "khúc";
+  if (/bap|trai\s*bap/i.test(norm)) return "bắp";
   if (/bat/i.test(norm)) return "bát";
   if (/to/i.test(norm)) return "tô";
   if (/o\s*\(banh|o\s*banh|o\s*vu/i.test(norm)) return "ổ";
@@ -263,6 +375,8 @@ function extractUnitNoun(label: string): string {
   if (/nam/i.test(norm)) return "nắm";
   if (/thia|muong/i.test(norm)) return "thìa";
   if (/goi/i.test(norm)) return "gói";
+  if (/tep/i.test(norm)) return "tép";
+  if (/nhanh/i.test(norm)) return "nhánh";
   return "đơn vị";
 }
 
@@ -443,3 +557,4 @@ export function getFoodPortionBadgeText(food: {
   }
   return `${food.defaultPortionG || 100}g`;
 }
+
