@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/env";
+import { resolveSyncToken } from "@/lib/activity/pairingStore";
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(req: NextRequest) {
   try {
@@ -19,16 +22,25 @@ export async function GET(req: NextRequest) {
 
     // Authenticate user
     let userId: string | null = null;
+    let isSignedToken = false;
+    let bearerToken = "";
     const authHeader = req.headers.get("Authorization");
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (authHeader && authHeader.startsWith("Bearer ")) {
-      const token = authHeader.replace("Bearer ", "").trim();
-      const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey);
-      const { data: { user }, error: tokenErr } = await supabase.auth.getUser(token);
-      if (user && !tokenErr) {
-        userId = user.id;
+      bearerToken = authHeader.replace("Bearer ", "").trim();
+      const resolved = resolveSyncToken(bearerToken);
+      if (resolved) {
+        userId = resolved.userId;
+        isSignedToken = true;
+      } else {
+        const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey);
+        const { data: { user }, error: tokenErr } = await supabase.auth.getUser(bearerToken);
+        if (user && !tokenErr) {
+          userId = user.id;
+        }
       }
     }
 
@@ -49,7 +61,16 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey);
+    if (!UUID_REGEX.test(userId)) {
+      return NextResponse.json({ activities: [], mode: "demo" });
+    }
+
+    const clientKey = serviceRoleKey || supabaseAnonKey;
+    const clientOptions = (!serviceRoleKey && !isSignedToken && bearerToken)
+      ? { global: { headers: { Authorization: `Bearer ${bearerToken}` } } }
+      : undefined;
+
+    const supabase = createSupabaseClient(supabaseUrl, clientKey, clientOptions);
 
     if (dateParam) {
       const { data, error } = await supabase
@@ -108,4 +129,3 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: err.message || "Internal server error" }, { status: 500 });
   }
 }
-

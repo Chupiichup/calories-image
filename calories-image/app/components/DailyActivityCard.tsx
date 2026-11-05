@@ -8,13 +8,14 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
-  HelpCircle,
   ChevronDown,
   ChevronUp,
-  ExternalLink,
   Calendar,
   X,
   Download,
+  KeyRound,
+  Copy,
+  Check,
 } from "lucide-react";
 import {
   repository,
@@ -36,14 +37,36 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
   const [showInstructions, setShowInstructions] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
+  // Pairing code state
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+
   // Load activity for date
   const loadActivityData = async () => {
     setIsLoading(true);
     try {
-      const [todayAct, recents] = await Promise.all([
+      let [todayAct, recents] = await Promise.all([
         repository.getActivityForDate(targetDate),
         repository.getRecentActivities(7),
       ]);
+
+      // If not in local storage / repository, query API directly
+      if (!todayAct) {
+        try {
+          const res = await fetch(`/api/activity?date=${targetDate}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.activity) {
+              todayAct = data.activity;
+              await repository.saveActivity(data.activity);
+            }
+          }
+        } catch {
+          // ignore network error
+        }
+      }
+
       setActivity(todayAct);
       setRecentActivities(recents);
     } catch (err) {
@@ -64,6 +87,33 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
     }
   };
 
+  // Fetch 6-digit pairing code
+  const fetchPairingCode = async () => {
+    setPairingLoading(true);
+    try {
+      const res = await fetch("/api/activity/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.code) {
+          setPairingCode(data.code);
+        }
+      }
+    } catch (err) {
+      console.error("Fetch pairing code error:", err);
+    } finally {
+      setPairingLoading(false);
+    }
+  };
+
+  const handleOpenInstructions = () => {
+    setShowInstructions(true);
+    fetchPairingCode();
+  };
+
   // Format last synced timestamp
   const formatSyncedTime = (isoString?: string) => {
     if (!isoString) return "Chưa đồng bộ";
@@ -82,7 +132,6 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
   };
 
   const isConnected = !!activity && !!activity.syncedAt;
-  const isToday = targetDate === getLocalDateString();
 
   return (
     <div className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm space-y-5">
@@ -133,7 +182,7 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
 
           <button
             type="button"
-            onClick={() => setShowInstructions(true)}
+            onClick={handleOpenInstructions}
             className="flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition"
           >
             <Smartphone className="h-3.5 w-3.5" />
@@ -299,7 +348,7 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
               <div className="flex items-center gap-2">
                 <Smartphone className="h-5 w-5 text-emerald-600" />
                 <h3 className="text-base font-bold text-stone-900">
-                  Kết nối Samsung Health qua Android Health Connect
+                  Kết nối Samsung Health qua Android Companion
                 </h3>
               </div>
               <button
@@ -312,10 +361,52 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
             </div>
 
             <div className="space-y-3.5 text-xs text-stone-600 leading-relaxed">
-              <p>
-                Trình duyệt web di động (Chrome, Samsung Internet) vì lý do bảo mật của Google không thể đọc trực tiếp cảm biến Health Connect. Để đồng bộ bước chân & calo tự động, bạn chỉ cần mở ứng dụng Android Companion đi kèm:
-              </p>
+              {/* 6-Digit Pairing Code Banner */}
+              <div className="rounded-2xl bg-emerald-50/90 p-4 border border-emerald-200 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                    <KeyRound className="h-4 w-4 text-emerald-700" />
+                    Mã kết nối nhanh với điện thoại (6 số):
+                  </span>
+                  <button
+                    onClick={fetchPairingCode}
+                    disabled={pairingLoading}
+                    className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 underline flex items-center gap-1"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${pairingLoading ? "animate-spin" : ""}`} />
+                    <span>Lấy mã mới</span>
+                  </button>
+                </div>
 
+                <div className="flex items-center justify-center gap-3 py-2.5 bg-white rounded-xl border border-emerald-200 shadow-xs">
+                  <span className="text-2xl font-black tracking-widest text-emerald-800 font-mono">
+                    {pairingLoading
+                      ? "Đang tạo mã..."
+                      : pairingCode
+                      ? `${pairingCode.slice(0, 3)} ${pairingCode.slice(3)}`
+                      : "Nhấn 'Lấy mã mới'"}
+                  </span>
+                  {pairingCode && (
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(pairingCode);
+                        setCodeCopied(true);
+                        setTimeout(() => setCodeCopied(false), 2000);
+                      }}
+                      className="rounded-lg bg-emerald-100 p-1.5 text-emerald-800 hover:bg-emerald-200 transition"
+                      title="Sao chép mã"
+                    >
+                      {codeCopied ? <Check className="h-4 w-4 text-emerald-700" /> : <Copy className="h-4 w-4" />}
+                    </button>
+                  )}
+                </div>
+
+                <p className="text-[11px] text-emerald-800 text-center font-medium">
+                  Mở app <strong>Calories Image Companion</strong> trên điện thoại &rarr; chọn <strong>"Nhập mã kết nối (6 số)"</strong> &rarr; điền mã trên để liên kết tự động trong 15 phút.
+                </p>
+              </div>
+
+              {/* Step by step guide */}
               <div className="rounded-2xl bg-stone-50 p-3.5 border border-stone-200/80 space-y-2.5">
                 <div className="flex items-start gap-2.5">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white font-bold text-[10px]">
@@ -323,7 +414,7 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
                   </span>
                   <div>
                     <strong className="text-stone-900 block font-semibold">Cài đặt Health Connect & Samsung Health:</strong>
-                    <span>Đảm bảo trên điện thoại Samsung của bạn đã cài đặt ứng dụng Samsung Health và kích hoạt đồng bộ với Android Health Connect (Cài đặt &rarr; Ứng dụng &rarr; Health Connect).</span>
+                    <span>Đảm bảo trên điện thoại Samsung đã kích hoạt đồng bộ dữ liệu với Android Health Connect (trong Cài đặt Samsung Health).</span>
                   </div>
                 </div>
 
@@ -332,8 +423,8 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
                     2
                   </span>
                   <div>
-                    <strong className="text-stone-900 block font-semibold">Cấp quyền truy cập trong ứng dụng:</strong>
-                    <span>Mở ứng dụng <strong>Calories Image Companion</strong> trên Android, bấm <em>"Cấp quyền Health Connect"</em> cho 2 chỉ số: <strong>Bước chân (Steps)</strong> và <strong>Calo hoạt động (Active Calories)</strong>.</span>
+                    <strong className="text-stone-900 block font-semibold">Cấp quyền và liên kết tài khoản:</strong>
+                    <span>Trong app Companion, cấp quyền Health Connect cho <strong>Bước chân</strong> & <strong>Calo hoạt động</strong>, sau đó nhập mã kết nối 6 số hoặc đăng nhập email.</span>
                   </div>
                 </div>
 
@@ -342,16 +433,17 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
                     3
                   </span>
                   <div>
-                    <strong className="text-stone-900 block font-semibold">Bấm "Đồng bộ ngay":</strong>
-                    <span>Dữ liệu sẽ được gửi thẳng lên hệ thống máy chủ và hiển thị ngay lập tức trên dashboard web của bạn.</span>
+                    <strong className="text-stone-900 block font-semibold">Bấm "Đồng bộ lên Web ngay":</strong>
+                    <span>Dữ liệu bước chân và calo vận động sẽ lập tức xuất hiện trên dashboard web của bạn.</span>
                   </div>
                 </div>
               </div>
 
+              {/* APK Download Button */}
               <div className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 p-4 text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h4 className="font-bold text-sm">Tải file cài đặt APK cho điện thoại</h4>
-                  <p className="text-[11px] text-emerald-100">Bản cài đặt trực tiếp CaloriesImageCompanion.apk (17.2 MB)</p>
+                  <h4 className="font-bold text-sm">Cập nhật app APK mới nhất</h4>
+                  <p className="text-[11px] text-emerald-100">Bản CaloriesImageCompanion.apk mới nhất hỗ trợ mã 6 số & Dark mode</p>
                 </div>
                 <a
                   href="/CaloriesImageCompanion.apk"
@@ -361,13 +453,6 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
                   <Download className="h-4 w-4 text-emerald-700" />
                   <span>Tải file APK (.apk)</span>
                 </a>
-              </div>
-
-              <div className="rounded-xl bg-emerald-50/70 p-3 border border-emerald-200 text-emerald-900">
-                <p className="font-semibold">Mã nguồn Android Companion:</p>
-                <p className="text-[11px] text-emerald-800 mt-0.5">
-                  Mã nguồn Android được lưu tại thư mục <code className="bg-white/80 px-1 py-0.5 rounded font-mono text-[10px]">android-companion/</code> trong repository dự án của bạn (sử dụng Kotlin, Jetpack Compose và AndroidX Health Connect SDK chuẩn của Google).
-                </p>
               </div>
             </div>
 
@@ -386,4 +471,3 @@ export function DailyActivityCard({ selectedDate, onRefresh }: DailyActivityCard
     </div>
   );
 }
-

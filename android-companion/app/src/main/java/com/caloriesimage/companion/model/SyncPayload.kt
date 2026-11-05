@@ -33,3 +33,41 @@ data class SyncResponse(
     val mode: String?
 )
 
+data class PairResponse(
+    @SerializedName("success")
+    val success: Boolean,
+
+    @SerializedName("token")
+    val token: String?,
+
+    @SerializedName("userId")
+    val userId: String?,
+
+    @SerializedName("email")
+    val email: String?,
+
+    @SerializedName("error")
+    val error: String?
+)
+
+data class LoginResponse(
+    @SerializedName("success")
+    val success: Boolean,
+
+    @SerializedName("token")
+    val token: String?,
+
+    @SerializedName("user")
+    val user: UserInfo?,
+
+    @SerializedName("error")
+    val error: String?
+)
+
+data class UserInfo(
+    @SerializedName("id")
+    val id: String?,
+
+    @SerializedName("email")
+    val email: String?
+)

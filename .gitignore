@@ -16,10 +16,16 @@ coverage
 out/
 build
 
-# misc
-.DS_Store
-*.pem
-*.log
+# IDE
+.vscode/
+.idea/
+
+# Android build outputs
+android-companion/.gradle/
+android-companion/build/
+android-companion/app/build/
+android-companion/*.log
+
 
 # env files
 .env*.local
